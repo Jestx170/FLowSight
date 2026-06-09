@@ -1,0 +1,31 @@
+services:
+  flowsight:
+    build: .
+    image: flowsight:latest
+    container_name: flowsight
+    ports:
+      - "5000:5000"          # open http://localhost:5000 on the Mac
+    volumes:
+      - ./data:/app/data      # yolov8n.pt (model) + behavior_log.db persist here
+      - ./config:/app/config  # zones / behaviors / brand configs persist & editable
+    environment:
+      - TZ_OFFSET=${TZ_OFFSET:-7}
+      - CLOUD_MODE=${CLOUD_MODE:-0}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped
+
+    # ── Multi-camera: each camera runs its own YOLO model thread on CPU.
+    #    Give the container enough cores/RAM for the number of cameras you run.
+    #    NOTE: Docker Desktop (Mac) also caps the VM's CPU/RAM in
+    #    Settings → Resources — raise those to at least these values.
+    cpus: "6.0"        # ~3 cores per camera for 2 cameras
+    mem_limit: 4g      # each YOLO model ~0.7–1 GB + frame buffers
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

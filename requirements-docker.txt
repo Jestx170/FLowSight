@@ -1,0 +1,13 @@
+# FlowSight — container dependencies (web app only, headless OpenCV)
+#
+# Bounded ranges keep builds reproducible-ish without pinning to versions that
+# may not have arm64 wheels. After a first successful build you can freeze exact
+# versions with:  docker compose run --rm flowsight pip freeze
+#
+# NOTE: ultralytics pulls in full opencv-python (needs libGL). The Dockerfile
+# replaces it with opencv-python-headless after install — see Dockerfile.
+flask>=3.0,<4
+numpy>=1.26,<3
+ultralytics>=8.3,<9
+reportlab>=4.0,<5
+opencv-python-headless>=4.9,<5

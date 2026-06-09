@@ -1,0 +1,30 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+
+# ── Models & data (binary, generated) ─────────────────────────────────────────
+*.pt
+data/
+behavior_log.db
+
+# ── Runtime-generated configs (ship *.example.json instead) ───────────────────
+zones_config.json
+behaviors_config.json
+brand_config.json
+
+# ── Installers & embedded runtime (build artifacts) ───────────────────────────
+installer/VC_redist.x64.exe
+installer/python_embedded/
+installer_output/
+
+# ── macOS ──────────────────────────────────────────────────────────────────────
+._*
+.DS_Store
+
+# Virtualenv (lives on external drive)
+.venv/

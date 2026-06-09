@@ -1,0 +1,30 @@
+# Keep the build context small & free of secrets/binaries
+
+# VCS / docs
+.git
+.gitignore
+*.md
+
+# Python caches
+**/__pycache__/
+*.pyc
+*.pyo
+*.log
+
+# Real runtime data & configs — provided via volumes, never baked into the image
+data/
+config/zones_config.json
+config/behaviors_config.json
+config/brand_config.json
+
+# Windows installer artifacts & launchers (not used in a Linux container)
+scripts/installer/
+scripts/installer_output/
+scripts/*.bat
+
+# Host-only dependency list (container uses requirements-docker.txt)
+requirements.txt
+
+# macOS noise
+._*
+.DS_Store

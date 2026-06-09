@@ -1,0 +1,65 @@
+[
+  {
+    "id": "browsing",
+    "name": "Browsing",
+    "zone": "any",
+    "action": "moving",
+    "threshold": 0,
+    "alert": false,
+    "color": "#888888"
+  },
+  {
+    "id": "in_wine_zone",
+    "name": "In wine zone",
+    "zone": "product",
+    "action": "presence",
+    "threshold": 0,
+    "alert": false,
+    "color": "#6366f1"
+  },
+  {
+    "id": "tasting",
+    "name": "Looking for a wine",
+    "zone": "product",
+    "action": "dwell",
+    "threshold": 20,
+    "alert": false,
+    "color": "#6366f1"
+  },
+  {
+    "id": "interested",
+    "name": "High interest",
+    "zone": "product",
+    "action": "dwell",
+    "threshold": 40,
+    "alert": true,
+    "color": "rgb(245, 158, 11)"
+  },
+  {
+    "id": "checkout",
+    "name": "Checkout",
+    "zone": "checkout",
+    "action": "dwell",
+    "threshold": 5,
+    "alert": true,
+    "color": "#22c55e"
+  },
+  {
+    "id": "loitering",
+    "name": "Loitering",
+    "zone": "any",
+    "action": "dwell",
+    "threshold": 300,
+    "alert": true,
+    "color": "#ef4444"
+  },
+  {
+    "id": "waiting",
+    "name": "Waiting",
+    "zone": "seating",
+    "action": "dwell",
+    "threshold": 20,
+    "alert": true,
+    "color": "#f97316"
+  }
+]
