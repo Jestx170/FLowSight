@@ -1,0 +1,1 @@
+import{u as o,c,a,t as s,b as t,o as l}from"./index-CsZ4fVe1.js";const n={class:"placeholder-view"},u={__name:"LiveView",setup(r){const{t:e}=o();return(i,p)=>(l(),c("section",n,[a("h1",null,s(t(e)("nav.live")),1),a("p",null,s(t(e)("scaffold.placeholder")),1)]))}};export{u as default};

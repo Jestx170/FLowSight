@@ -54,7 +54,8 @@ try:
 except Exception as _e:
     log.warning("Could not set behavior_engine config path: %s", _e)
 
-TMPL_PATH  = os.path.join(TEMPLATES_DIR, "index.html")
+TMPL_PATH      = os.path.join(TEMPLATES_DIR, "index.html")
+VUE_TMPL_PATH  = os.path.join(TEMPLATES_DIR, "index_vue.html")  # Vue SPA, served at /v2 during migration
 TZ         = int(os.environ.get("TZ_OFFSET", "7"))
 MAX_ALERTS = 200
 
@@ -923,6 +924,15 @@ def index():
             return f.read()
     except FileNotFoundError:
         return "<h1>FlowSight</h1><p>index.html not found. Place it in templates/ or project root.</p>", 500
+
+@app.route("/v2")
+def index_vue():
+    """Vue 3 SPA (migration in progress). Becomes "/" at cutover (Phase 9)."""
+    try:
+        with open(VUE_TMPL_PATH, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "<h1>FlowSight v2</h1><p>Vue build not found. Run: cd frontend && npm run deploy</p>", 500
 
 # ── Detection engine ──────────────────────────────────────────────────────────
 def _push_frame(frame: np.ndarray):

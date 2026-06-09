@@ -1,5 +1,10 @@
 # =============================================================================
-# app.py — FlowSight Desktop Entry Point
+# app.py — FlowSight Desktop/Windows entry point.
+#
+# This is a LAUNCHER, not the web app. It boots the Flask server (server.py) and
+# opens the browser — used by scripts/run.bat & FlowSight.bat on Windows.
+# The actual web app + all endpoints live in server.py. To run the server
+# directly (native/Docker) use:  python -m src.api.server
 # =============================================================================
 import sys, os, threading, time, subprocess, webbrowser
 from pathlib import Path

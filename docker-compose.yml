@@ -4,10 +4,10 @@ services:
     image: flowsight:latest
     container_name: flowsight
     ports:
-      - "5000:5000"          # open http://localhost:5000 on the Mac
+      - "5001:5000"          # open http://localhost:5000 on the Mac
     volumes:
-      - ./data:/app/data      # yolov8n.pt (model) + behavior_log.db persist here
-      - ./config:/app/config  # zones / behaviors / brand configs persist & editable
+      - ./backend/data:/app/data      # yolov8n.pt (model) + behavior_log.db persist here
+      - ./backend/config:/app/config  # zones / behaviors / brand configs persist & editable
     environment:
       - TZ_OFFSET=${TZ_OFFSET:-7}
       - CLOUD_MODE=${CLOUD_MODE:-0}

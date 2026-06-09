@@ -24,10 +24,10 @@ COPYFILE_DISABLE=1 tar \
   --exclude='./.git' \
   --exclude='./scripts/installer' \
   --exclude='./scripts/installer_output' \
-  --exclude='./data' \
-  --exclude='./config/zones_config.json' \
-  --exclude='./config/behaviors_config.json' \
-  --exclude='./config/brand_config.json' \
+  --exclude='./backend/data' \
+  --exclude='./backend/config/zones_config.json' \
+  --exclude='./backend/config/behaviors_config.json' \
+  --exclude='./backend/config/brand_config.json' \
   --exclude='*.md' \
   -cf - . | docker build -t flowsight:latest -
 

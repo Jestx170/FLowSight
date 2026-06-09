@@ -5,6 +5,10 @@
 .gitignore
 *.md
 
+# Node — built inside the image's frontend stage from source, not copied from host
+frontend/node_modules/
+frontend/dist/
+
 # Python caches
 **/__pycache__/
 *.pyc
@@ -12,10 +16,10 @@
 *.log
 
 # Real runtime data & configs — provided via volumes, never baked into the image
-data/
-config/zones_config.json
-config/behaviors_config.json
-config/brand_config.json
+backend/data/
+backend/config/zones_config.json
+backend/config/behaviors_config.json
+backend/config/brand_config.json
 
 # Windows installer artifacts & launchers (not used in a Linux container)
 scripts/installer/

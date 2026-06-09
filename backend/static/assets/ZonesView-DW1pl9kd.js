@@ -1,0 +1,1 @@
+import{u as t,c as n,a as s,t as a,b as o,o as c}from"./index-Z6C93Drw.js";const l={class:"placeholder-view"},i={__name:"ZonesView",setup(r){const{t:e}=t();return(p,_)=>(c(),n("section",l,[s("h1",null,a(o(e)("nav.zones")),1),s("p",null,a(o(e)("scaffold.placeholder")),1)]))}};export{i as default};

@@ -5,6 +5,17 @@
 # server only — webcam/GUI modes are not usable in a container on Mac, but
 # RTSP/network cameras work fine.
 # =============================================================================
+
+# ── stage 1: build the Vue SPA ───────────────────────────────────────────────
+# Produces dist/index.html (-> templates/) and dist/assets/* (-> static/assets/).
+FROM node:20-slim AS frontend
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ── stage 2: python runtime ──────────────────────────────────────────────────
 FROM python:3.12-slim
 
 # System deps:
@@ -27,10 +38,14 @@ RUN pip install --no-cache-dir -r requirements-docker.txt \
 # App code.  data/ (model + db) and the real *_config.json come in as volumes
 # at runtime (see docker-compose.yml); only the shipped config/ examples +
 # bytetrack.yaml are baked in.
-COPY src/        ./src/
-COPY templates/  ./templates/
-COPY static/     ./static/
-COPY config/     ./config/
+COPY backend/src/        ./src/
+COPY backend/config/     ./config/
+# Baked static (icons etc.) first, then overlay the freshly built Vue assets and
+# the Vue index.html — so the image always serves the current SPA, not whatever
+# stale build happens to sit in backend/templates on the host.
+COPY backend/static/     ./static/
+COPY --from=frontend /frontend/dist/assets/     ./static/assets/
+COPY --from=frontend /frontend/dist/index.html  ./templates/index_vue.html
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

@@ -1,0 +1,1 @@
+import{u as t,c,a,t as s,b as o,o as n}from"./index-Z6C93Drw.js";const r={class:"placeholder-view"},u={__name:"DashboardView",setup(l){const{t:e}=t();return(p,_)=>(n(),c("section",r,[a("h1",null,s(o(e)("nav.dashboard")),1),a("p",null,s(o(e)("scaffold.placeholder")),1)]))}};export{u as default};

@@ -1,0 +1,1 @@
+import{u as o,c,a,t as s,b as t,o as n}from"./index-CsZ4fVe1.js";const l={class:"placeholder-view"},i={__name:"HeatMapView",setup(r){const{t:e}=o();return(p,_)=>(n(),c("section",l,[a("h1",null,s(t(e)("nav.heatmap")),1),a("p",null,s(t(e)("scaffold.placeholder")),1)]))}};export{i as default};

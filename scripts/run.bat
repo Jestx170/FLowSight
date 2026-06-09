@@ -1,7 +1,7 @@
 @echo off
 title FlowSight
-REM Run from PROJECT_ROOT so the `src` package is importable
-cd /d "%~dp0.."
+REM Run from backend/ so the `src` package + templates/static/config/data resolve
+cd /d "%~dp0..\backend"
 
 REM Desktop entry point (opens app window via Chrome/Edge)
 python -m src.api.app

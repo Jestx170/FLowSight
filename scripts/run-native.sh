@@ -9,7 +9,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT/backend"   # `src` package + templates/static/config/data live here
 
 VENV="${FLOWSIGHT_VENV:-$HOME/.venvs/flowsight}"
 PORT="${FLOWSIGHT_PORT:-5001}"
