@@ -919,20 +919,12 @@ def api_push():
 # ── Web UI ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
-    try:
-        with open(TMPL_PATH, encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "<h1>FlowSight</h1><p>index.html not found. Place it in templates/ or project root.</p>", 500
-
-@app.route("/v2")
-def index_vue():
-    """Vue 3 SPA (migration in progress). Becomes "/" at cutover (Phase 9)."""
+    """Serves the new frontend build (React/Vue SPA)."""
     try:
         with open(VUE_TMPL_PATH, encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
-        return "<h1>FlowSight v2</h1><p>Vue build not found. Run: cd frontend && npm run deploy</p>", 500
+        return "<h1>FlowSight</h1><p>Frontend build not found. Run: docker compose build</p>", 500
 
 # ── Detection engine ──────────────────────────────────────────────────────────
 def _push_frame(frame: np.ndarray):
