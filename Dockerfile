@@ -40,6 +40,7 @@ RUN pip install --no-cache-dir -r requirements-docker.txt \
 # bytetrack.yaml are baked in.
 COPY backend/src/        ./src/
 COPY backend/config/     ./config/
+COPY backend/templates/  ./templates/
 # Baked static (icons etc.) first, then overlay the freshly built Vue assets and
 # the Vue index.html — so the image always serves the current SPA, not whatever
 # stale build happens to sit in backend/templates on the host.
