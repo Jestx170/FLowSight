@@ -6,7 +6,7 @@
 
 ## 0. โครงสร้างโปรเจกต์ — แก้ตรงไหน? (อ่านก่อนเริ่ม)
 
-โปรเจกต์แยกชัดเป็น 2 ส่วน: **`backend/`** (Flask + AI) และ **`frontend/`** (Vue 3 SPA)
+โปรเจกต์แยกชัดเป็น 2 ส่วน: **`backend/`** (Flask + AI) และ **`frontend/`** (React SPA, ธีม Odoo)
 
 ```
 flowsight/
@@ -17,22 +17,22 @@ flowsight/
 │  │  ├─ engine/                 ← AI: tracker.py, zones.py, behavior_engine.py
 │  │  ├─ utils/                  ← dashboard, heatmap, report_pdf, alert, logger, ...
 │  │  └─ paths.py                ← จุดรวม path ทั้งหมด (PROJECT_ROOT = backend/)
-│  ├─ templates/index.html       ← หน้าเว็บที่ใช้งานจริงตอนนี้ (legacy, เสิร์ฟที่ /)
-│  ├─ templates/index_vue.html   ← Vue build (เสิร์ฟที่ /v2) — มาจาก `npm run deploy`
+│  ├─ templates/index.html       ← หน้าเว็บที่เสิร์ฟที่ / (legacy vanilla — กำลังถูกแทน)
+│  ├─ templates/index_vue.html   ← React build (เสิร์ฟที่ /v2) — มาจาก docker build / deploy
 │  ├─ static/js|css/             ← JS/CSS ของ legacy UI
-│  ├─ static/assets/             ← Vue build output + ไอคอน
+│  ├─ static/assets/             ← React build output + ไอคอน (icon.png = โลโก้)
 │  ├─ config/                    ← *.json (zones/behaviors/brand) — แก้ผ่าน UI ได้
 │  └─ data/                      ← yolov8n.pt (โมเดล) + behavior_log.db
 │
-├─ frontend/                   ★ Vue 3 SPA (กำลัง migrate มาแทน legacy)
-│  ├─ src/views/*.vue            ← เนื้อหาแต่ละหน้า (Live/Dashboard/Zones/...)
-│  ├─ src/components/            ← component ใช้ซ้ำ (NavBar, ...)
-│  ├─ src/router/index.js        ← เส้นทาง (routes)
-│  ├─ src/i18n/locales/*.js      ← ข้อความ 2 ภาษา (en/th)
-│  ├─ src/assets/style.css       ← สไตล์รวม
-│  └─ vite.config.js             ← config build + dev proxy (/api → :5001)
+├─ frontend/                   ★ React 19 + Vite + Tailwind + shadcn/ui (ธีม Odoo ม่วง)
+│  ├─ src/pages/*.tsx            ← เนื้อหาแต่ละหน้า (Live/Dashboard/Zones/Behaviors/Heatmap/Settings)
+│  ├─ src/api.ts                 ← ตัวเรียก REST API ทั้งหมด (relative /api)
+│  ├─ src/i18n.ts                ← ข้อความ 2 ภาษา (en/th)
+│  ├─ src/styles.css             ← theme tokens (Odoo: --primary #714B67)
+│  ├─ src/App.tsx                ← navbar + routing
+│  └─ vite.config.ts             ← base /static/ (prod) + dev proxy (/api → :5001)
 │
-├─ Dockerfile                  ← multi-stage: build Vue → ใส่ใน Python image
+├─ Dockerfile                  ← multi-stage: build React → ใส่ใน Python image
 ├─ docker-compose.yml
 ├─ requirements*.txt           ← Python deps (.txt = native, -docker.txt = ใน container)
 └─ scripts/                    ← run-native.sh (รัน native), run.bat (Windows), build, ...
@@ -44,17 +44,17 @@ flowsight/
 |---|---|---|
 | logic/endpoint ฝั่งเซิร์ฟเวอร์ | `backend/src/...` | restart เซิร์ฟเวอร์ |
 | AI / การตรวจจับพฤติกรรม | `backend/src/engine/` | restart |
-| **หน้าเว็บที่ใช้อยู่ตอนนี้** (legacy) | `backend/templates/index.html` + `backend/static/js/app.js` | refresh |
-| **หน้าเว็บใหม่** (Vue) | `frontend/src/` | `npm run dev` (HMR) หรือ `npm run deploy` → `/v2` |
+| **หน้าเว็บ (React)** | `frontend/src/pages/*.tsx` | `npm run dev` (HMR ที่ :8080) |
+| สี/ธีม | `frontend/src/styles.css` | HMR |
 
 **รันโปรเจกต์:**
 ```bash
-scripts/run-native.sh          # รันแอป → http://localhost:5001  (legacy ที่ /, Vue ที่ /v2)
-cd frontend && npm run dev     # dev Vue พร้อม HMR (:5173) — รัน backend คู่ด้วย
+scripts/run-native.sh          # backend → http://localhost:5001
+cd frontend && npm run dev     # React dev + HMR (:8080), proxy /api ไป :5001 อัตโนมัติ
 ```
 
-> สถานะ migration: กำลังย้าย UI จาก legacy (vanilla JS) ไป Vue 3 แบบทีละหน้า
-> legacy ยังเสิร์ฟที่ `/` (ใช้งานได้) · Vue scaffold อยู่ที่ `/v2` · รายละเอียดใน `VUE_MIGRATION_PLAN.md`
+> สถานะ UI: React app (`frontend/`) เชื่อม backend ครบทุกฟังก์ชันแล้ว ใช้งานที่ :8080 (dev)
+> legacy vanilla ยังเสิร์ฟที่ `/` จนกว่าจะ cutover ให้ React เสิร์ฟแทนที่ `/`
 
 ---
 

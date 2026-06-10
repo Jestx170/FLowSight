@@ -8,6 +8,7 @@
 # Node — built inside the image's frontend stage from source, not copied from host
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
 
 # Python caches
 **/__pycache__/

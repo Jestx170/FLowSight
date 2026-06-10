@@ -1,0 +1,1 @@
+import{i as a,l}from"./index-BAWtAxtB.js";function s(i,o=1500,{immediate:u=!0}={}){let t=null;async function n(){try{await i()}catch{}}function e(){t||(u&&n(),t=setInterval(n,o))}function r(){t&&(clearInterval(t),t=null)}return a(e),l(r),{start:e,stop:r,tick:n}}export{s as u};

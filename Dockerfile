@@ -6,7 +6,7 @@
 # RTSP/network cameras work fine.
 # =============================================================================
 
-# ── stage 1: build the Vue SPA ───────────────────────────────────────────────
+# ── stage 1: build the React SPA ──────────────────────────────────────────────
 # Produces dist/index.html (-> templates/) and dist/assets/* (-> static/assets/).
 FROM node:20-slim AS frontend
 WORKDIR /frontend
