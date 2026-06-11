@@ -1,6 +1,12 @@
 // Quick-start behavior presets (ported from the legacy app). Applying a template
 // replaces the whole behavior list with a curated set for that venue type.
 import type { BehaviorRow } from "./api";
+import retailIcon from "./public/shop-1-svgrepo-com.svg";
+import restaurantIcon from "./public/food-dish-svgrepo-com.svg";
+import wineshopIcon from "./public/wine-glass-svgrepo-com.svg";
+import exhibitionIcon from "./public/art-design-paint-pallet-format-text-svgrepo-com.svg";
+import cafeIcon from "./public/cafe-svgrepo-com.svg";
+import supermarketIcon from "./public/trolley-2-svgrepo-com.svg";
 
 interface TemplateBeh {
   id: string; name: string; name_th: string; zone: string;
@@ -8,6 +14,7 @@ interface TemplateBeh {
 }
 export interface BehaviorTemplate {
   key: string; icon: string;
+  iconSrc?: string; // optional image URL — takes precedence over the emoji
   en: { name: string; desc: string };
   th: { name: string; desc: string };
   behaviors: TemplateBeh[];
@@ -15,7 +22,7 @@ export interface BehaviorTemplate {
 
 export const BEH_TEMPLATES: BehaviorTemplate[] = [
   {
-    key: "retail", icon: "🛍️",
+    key: "retail", icon: "🛍️", iconSrc: retailIcon,
     en: { name: "Retail Shop", desc: "General retail — browsing, interest, checkout queue and loitering." },
     th: { name: "ร้านค้าปลีก", desc: "ร้านทั่วไป — เดินเลือก ความสนใจ คิวชำระเงิน และการยืนนาน" },
     behaviors: [
@@ -28,7 +35,7 @@ export const BEH_TEMPLATES: BehaviorTemplate[] = [
     ],
   },
   {
-    key: "restaurant", icon: "🍽️",
+    key: "restaurant", icon: "🍽️", iconSrc: restaurantIcon,
     en: { name: "Restaurant", desc: "Dine-in — seating wait times, table occupancy and entrance flow." },
     th: { name: "ร้านอาหาร", desc: "ร้านอาหาร — เวลารอที่นั่ง การใช้โต๊ะ และการเข้าออกร้าน" },
     behaviors: [
@@ -41,7 +48,7 @@ export const BEH_TEMPLATES: BehaviorTemplate[] = [
     ],
   },
   {
-    key: "wineshop", icon: "🍷",
+    key: "wineshop", icon: "🍷", iconSrc: wineshopIcon,
     en: { name: "Wine Shop", desc: "Wine & spirits — tasting dwell time, interest in premium products." },
     th: { name: "ร้านไวน์", desc: "ร้านไวน์ — เวลาชิม ความสนใจสินค้า premium" },
     behaviors: [
@@ -54,7 +61,7 @@ export const BEH_TEMPLATES: BehaviorTemplate[] = [
     ],
   },
   {
-    key: "exhibition", icon: "🏛️",
+    key: "exhibition", icon: "🏛️", iconSrc: exhibitionIcon,
     en: { name: "Exhibition", desc: "Trade show / museum — exhibit engagement, crowd flow, dwell at displays." },
     th: { name: "นิทรรศการ", desc: "งานแสดง / พิพิธภัณฑ์ — การมีส่วนร่วม การไหลของฝูงชน เวลาที่จุดแสดง" },
     behaviors: [
@@ -67,7 +74,7 @@ export const BEH_TEMPLATES: BehaviorTemplate[] = [
     ],
   },
   {
-    key: "cafe", icon: "☕",
+    key: "cafe", icon: "☕", iconSrc: cafeIcon,
     en: { name: "Cafe", desc: "Coffee shop — counter queue, table turnover and long-stay customers." },
     th: { name: "คาเฟ่", desc: "ร้านกาแฟ — คิวหน้าเคาน์เตอร์ การหมุนเวียนโต๊ะ และลูกค้านั่งนาน" },
     behaviors: [
@@ -80,7 +87,7 @@ export const BEH_TEMPLATES: BehaviorTemplate[] = [
     ],
   },
   {
-    key: "supermarket", icon: "🛒",
+    key: "supermarket", icon: "🛒", iconSrc: supermarketIcon,
     en: { name: "Supermarket", desc: "Large retail — aisle browsing, product interest, checkout queue, staff coverage." },
     th: { name: "ซูเปอร์มาร์เก็ต", desc: "ร้านขนาดใหญ่ — เดินในช่อง สินค้าน่าสนใจ คิวชำระเงิน และพนักงาน" },
     behaviors: [

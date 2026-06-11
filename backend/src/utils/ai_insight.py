@@ -12,6 +12,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 
+from src.utils.metrics_sql import VISITOR_KEY, INTERESTED_IN, PURCHASING_IN
+
 TZ = 7
 
 
@@ -27,26 +29,23 @@ def get_daily_data(db_path: str, date_filter: str = None) -> dict:
     try:
         total = q(f"SELECT COUNT(*) FROM events WHERE is_new_visit=1 {wh}", p)[0][0]
         if total == 0:
-            total = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE 1=1 {wh}", p)[0][0]
+            total = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE 1=1 {wh}", p)[0][0]
     except Exception:
-        total = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE 1=1 {wh}", p)[0][0]
+        total = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE 1=1 {wh}", p)[0][0]
 
-    # NOTE: column is 'behavior_id', not 'behavior'
-    # 'tasting'/'in_wine_zone' = product zone, 'interested' = high interest dwell
-    # 'checkout' = reached checkout zone
-    # 'loitering' = loitering behavior id
-    # 'waiting' = waiting in seating zone
-    inter   = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE behavior_id IN ('tasting','interested','in_wine_zone') {wh}", p)[0][0]
-    purch   = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE behavior_id IN ('checkout','checkout_ready','purchasing') {wh}", p)[0][0]
-    loiter  = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE behavior_id IN ('loitering','loiter') {wh}", p)[0][0]
-    waiting = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE behavior_id IN ('waiting','waiting_too_long') {wh}", p)[0][0]
+    # Visitor counts use (cam_key, person_id) and the shared interested/purchasing
+    # id sets (src/utils/metrics_sql.py) so this matches /api/stats and the PDF.
+    inter   = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN {INTERESTED_IN} {wh}", p)[0][0]
+    purch   = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN {PURCHASING_IN} {wh}", p)[0][0]
+    loiter  = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN ('loitering','loiter') {wh}", p)[0][0]
+    waiting = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN ('waiting','waiting_too_long') {wh}", p)[0][0]
     alerts  = q(f"SELECT COUNT(*) FROM events WHERE needs_staff=1 {wh}", p)[0][0]
     dr      = q(f"""SELECT
         MIN(strftime('%H:%M',datetime(timestamp,'unixepoch','+{TZ} hours'))),
         MAX(strftime('%H:%M',datetime(timestamp,'unixepoch','+{TZ} hours')))
         FROM events WHERE 1=1 {wh}""", p)[0]
     hourly  = q(f"""SELECT strftime('%H',datetime(timestamp,'unixepoch','+{TZ} hours')) hr,
-                          COUNT(DISTINCT person_id) n
+                          COUNT(DISTINCT {VISITOR_KEY}) n
                     FROM events WHERE 1=1 {wh} GROUP BY hr ORDER BY hr""", p)
     behs    = q(f"SELECT behavior_id,COUNT(*) n FROM events WHERE 1=1 {wh} GROUP BY behavior_id ORDER BY n DESC LIMIT 8", p)
     zones   = q(f"""SELECT zone_name,COUNT(*) n FROM events WHERE zone!='floor' {wh}
@@ -73,11 +72,11 @@ def get_daily_data(db_path: str, date_filter: str = None) -> dict:
     }
 
 
-def build_prompt(data: dict) -> str:
+def build_prompt(data: dict, brand_name: str = "this retail store") -> str:
     hourly_str = ", ".join([f"{h}:00={c}" for h, c in data["hourly"]]) or "no data"
     beh_str    = ", ".join([f"{b}:{c}" for b, c in data["behaviors"]]) or "no data"
     zone_str   = ", ".join([f"{z}:{c}" for z, c in data["zones"]]) or "no data"
-    return f"""You are a retail analytics expert for Wine O'Clock, a wine store in Khon Kaen, Thailand.
+    return f"""You are a retail analytics expert for {brand_name}.
 
 Analyze this daily customer behavior data and give actionable insights:
 
@@ -217,7 +216,7 @@ def _rule_based(data: dict) -> str:
 
 # ── Main function ─────────────────────────────────────────────────────────────
 def get_ai_insight(db_path: str, date_filter: str = None,
-                   api_key: str = None) -> dict:
+                   api_key: str = None, brand_name: str = "this retail store") -> dict:
     """
     คืน dict:
       ok=True  → {"ok":True, "insight":"...", "source":"Gemini|Claude", "data":{...}}
@@ -229,7 +228,7 @@ def get_ai_insight(db_path: str, date_filter: str = None,
     gemini_key  = api_key or os.environ.get("GEMINI_API_KEY", "")
     claude_key  = os.environ.get("ANTHROPIC_API_KEY", "")
 
-    prompt = build_prompt(data)
+    prompt = build_prompt(data, brand_name=brand_name)
 
     # ── Try Gemini first ──────────────────────────────────────────────────────
     if gemini_key:
@@ -257,18 +256,21 @@ def get_ai_insight(db_path: str, date_filter: str = None,
 
 
 def insight_to_html(insight_text: str) -> str:
-    """แปลง insight text เป็น HTML"""
+    """แปลง insight text เป็น HTML (AI output is plain markdown, not raw HTML)"""
+    import re, html as _html
     parts = []
     for line in insight_text.split("\n"):
         line = line.strip()
         if not line:
             continue
         if line.startswith("**") and line.endswith("**"):
-            parts.append(f'<div class="insight-section-title">{line.strip("*")}</div>')
+            title = _html.escape(line.strip("*"))
+            parts.append(f'<div class="insight-section-title">{title}</div>')
         elif len(line) >= 2 and line[0].isdigit() and line[1] == ".":
-            parts.append(f'<div class="insight-rec">{line}</div>')
+            safe = _html.escape(line)
+            parts.append(f'<div class="insight-rec">{safe}</div>')
         else:
-            import re
-            line = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line)
-            parts.append(f'<p class="insight-p">{line}</p>')
+            safe = _html.escape(line)
+            safe = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', safe)
+            parts.append(f'<p class="insight-p">{safe}</p>')
     return "\n".join(parts)

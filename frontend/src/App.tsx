@@ -7,7 +7,7 @@ import { BehaviorsPage } from "./pages/Behaviors";
 import { HeatmapPage } from "./pages/Heatmap";
 import { SettingsPage } from "./pages/Settings";
 import { Activity, BarChart3, LayoutGrid, ListChecks, Flame, Settings as Cog } from "lucide-react";
-import logo from "./assets/logo.png";
+import logo from "./public/logo.png";
 
 export default function App() {
   const route = useHashRoute();

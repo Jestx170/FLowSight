@@ -53,23 +53,24 @@
   --card-foreground: #1F2937;
   --popover: #FFFFFF;
   --popover-foreground: #1F2937;
-  --primary: #714B67;
-  --primary-hover: #5C3D54;
+  /* Brand palette (from logo): slate-grey primary + yellow accent */
+  --primary: #4A4F54;
+  --primary-hover: #3A3E42;
   --primary-foreground: #FFFFFF;
-  --secondary: #F3F4F6;
+  --secondary: #F3F4F5;
   --secondary-foreground: #1F2937;
-  --muted: #F3F4F6;
+  --muted: #F3F4F5;
   --muted-foreground: #6B7280;
-  --accent: #F3EEF2;
-  --accent-foreground: #714B67;
+  --accent: #FDF3D7;            /* light yellow tint — hover / active backgrounds */
+  --accent-foreground: #4A4F54;
   --destructive: #DC3545;
   --destructive-foreground: #FFFFFF;
   --success: #28A745;
-  --warning: #F0AD4E;
+  --warning: #F5B731;          /* brand yellow */
   --info: #17A2B8;
   --border: #DEE2E6;
   --input: #DEE2E6;
-  --ring: #875A7B;
+  --ring: #F5B731;             /* yellow focus ring */
   --radius: 8px;
 }
 

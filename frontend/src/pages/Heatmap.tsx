@@ -73,7 +73,7 @@ export function HeatmapPage() {
                     <span className="text-muted-foreground">{z.score.toFixed(1)}</span>
                   </div>
                   <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${(z.score / maxScore) * 100}%`, background: "linear-gradient(90deg,#714B67,#F0AD4E,#DC3545)" }} />
+                    <div className="h-full rounded-full" style={{ width: `${(z.score / maxScore) * 100}%`, background: "linear-gradient(90deg,#4A4F54,#F5B731,#DC3545)" }} />
                   </div>
                 </li>
               ))}

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type ActivityEvent, type Hourly, type Insight, type Stats, type ZoneActivity } from "../api";
+import { api, type ActivityEvent, type Hourly, type Insight, type Occupancy, type Stats, type ZoneActivity } from "../api";
 import { useLang } from "../i18n";
 import { Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend,
 } from "chart.js";
-import { Download, FileText, Sparkles, TrendingUp, Users, ShoppingCart, MapPin } from "lucide-react";
+import { Download, FileText, Sparkles, TrendingUp, Users, ShoppingCart, MapPin, UsersRound, Activity, Gauge } from "lucide-react";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -23,12 +23,23 @@ export function DashboardPage() {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [page, setPage] = useState(1);
   const [activity, setActivity] = useState<{ events: ActivityEvent[]; total: number; pages: number } | null>(null);
+  const [occ, setOcc] = useState<Occupancy | null>(null);
 
   useEffect(() => {
     api.stats().then(setStats).catch(() => setStats(null));
     api.hourly().then(setHourly).catch(() => setHourly(null));
     api.zoneActivity().then(setZones).catch(() => setZones([]));
     api.insight(date).then(setInsight).catch(() => setInsight(null));
+  }, [date]);
+
+  // Occupancy: the "live" half must stay fresh, so poll every 5s. The endpoint
+  // returns today's peak/avg in the same payload, recomputed for the chosen date.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => api.occupancy(date).then((o) => { if (!cancelled) setOcc(o); }).catch(() => {});
+    tick();
+    const id = window.setInterval(tick, 5000);
+    return () => { cancelled = true; window.clearInterval(id); };
   }, [date]);
 
   useEffect(() => {
@@ -52,13 +63,28 @@ export function DashboardPage() {
       labels: hourly.labels,
       datasets: hourly.datasets.map((d) => ({
         ...d,
-        backgroundColor: d.backgroundColor || "#714B67",
+        backgroundColor: d.backgroundColor || "#4A4F54",
         borderRadius: 4,
       })),
     };
   }, [hourly]);
 
   const maxZone = Math.max(1, ...zones.map((z) => z.count));
+
+  const occChart = useMemo(() => {
+    if (!occ) return null;
+    return {
+      labels: occ.today.labels,
+      datasets: [{
+        label: t.occ.hourly,
+        data: occ.today.series,
+        backgroundColor: "#4A4F54",
+        borderRadius: 4,
+      }],
+    };
+  }, [occ, t.occ.hourly]);
+
+  const occZones = Object.entries(occ?.live.zones ?? {}).sort((a, b) => b[1] - a[1]);
 
   return (
     <div className="space-y-6">
@@ -80,6 +106,65 @@ export function DashboardPage() {
         <Kpi label={t.dash.interested} value={stats?.interested ?? 0} icon={<TrendingUp size={18} />} />
         <Kpi label={t.dash.purchasing} value={stats?.purchasing ?? 0} icon={<ShoppingCart size={18} />} />
         <Kpi label={t.dash.topZone} value={stats?.top_zone || "—"} icon={<MapPin size={18} />} text />
+      </div>
+
+      {/* ── Live Occupancy ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="fs-card">
+          <div className="flex items-center gap-2 mb-4">
+            <UsersRound size={16} className="text-primary" />
+            <h2 className="font-semibold">{t.occ.title}</h2>
+            <span className={"ml-auto inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full " +
+              (occ?.running ? "bg-[var(--success)]/10 text-[var(--success)]" : "bg-muted text-muted-foreground")}>
+              <span className={"w-1.5 h-1.5 rounded-full " + (occ?.running ? "bg-[var(--success)] animate-pulse" : "bg-muted-foreground")} />
+              {occ?.running ? t.occ.live : t.occ.offline}
+            </span>
+          </div>
+          <div className="flex items-end gap-2">
+            <div className="text-5xl font-bold tabular-nums text-foreground">{occ?.live.total ?? 0}</div>
+            <div className="text-sm text-muted-foreground mb-1.5">{t.occ.now}</div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="rounded-md border border-border bg-surface px-3 py-2">
+              <div className="flex items-center gap-1 text-xs text-muted-foreground"><Activity size={12} />{t.occ.peak}</div>
+              <div className="text-xl font-semibold tabular-nums">{occ?.today.peak ?? 0}</div>
+              {occ?.today.peak ? <div className="text-xs text-muted-foreground">{t.occ.at} {occ.today.peak_time}</div> : null}
+            </div>
+            <div className="rounded-md border border-border bg-surface px-3 py-2">
+              <div className="flex items-center gap-1 text-xs text-muted-foreground"><Gauge size={12} />{t.occ.avg}</div>
+              <div className="text-xl font-semibold tabular-nums">{occ?.today.avg ?? 0}</div>
+            </div>
+          </div>
+          {occZones.length > 0 && (
+            <div className="mt-4">
+              <div className="text-xs text-muted-foreground mb-1.5">{t.occ.byZone}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {occZones.map(([z, n]) => (
+                  <span key={z} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border bg-secondary/40">
+                    {z} <span className="font-semibold tabular-nums">{n}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="fs-card lg:col-span-2">
+          <h2 className="font-semibold mb-4">{t.occ.hourly}</h2>
+          <div className="h-56">
+            {occChart ? (
+              <Bar
+                data={occChart}
+                options={{
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#F1F1F1" } }, x: { grid: { display: false } } },
+                }}
+              />
+            ) : (
+              <EmptyState />
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

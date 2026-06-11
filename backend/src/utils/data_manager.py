@@ -78,6 +78,13 @@ class DataManager:
             if count > 0:
                 conn.execute(
                     "DELETE FROM events WHERE timestamp < ?", (cutoff_ts,))
+                # occupancy_snapshots follows the same retention window
+                try:
+                    conn.execute(
+                        "DELETE FROM occupancy_snapshots WHERE timestamp < ?",
+                        (cutoff_ts,))
+                except sqlite3.OperationalError:
+                    pass   # table not created yet (pre-v2 DB)
                 conn.execute("VACUUM")   # reclaim disk space
                 conn.commit()
                 print(f"[DataManager] deleted {count} events "

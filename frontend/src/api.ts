@@ -14,6 +14,12 @@ export interface Camera { id: string; name: string; rtsp_url: string; enabled: b
 export interface Hud { running: boolean; cust: number; seller: number; alert: number; zones: number; cams: number; device: string; gpu_name?: string }
 export interface AlertItem { time: string; person: string; zone: string; behavior: string; behavior_id: string }
 export interface Stats { total: number; interested: number; purchasing: number; top_zone: string }
+export interface Occupancy {
+  ok: boolean;
+  running: boolean;
+  live: { total: number; zones: Record<string, number>; cams: Record<string, number> };
+  today: { peak: number; peak_time: string; avg: number; labels: string[]; series: number[] };
+}
 export interface ZoneActivity { zone: string; count: number }
 export interface Hourly { labels: string[]; datasets: Array<{ label: string; data: number[]; backgroundColor?: string; borderColor?: string }> }
 export interface ActivityEvent { time: string; date: string; person_id: string; zone: string; behavior: string; alert: boolean }
@@ -40,6 +46,7 @@ export const api = {
   stop: (cam?: string) => j(cam ? `/api/stop/${cam}` : "/api/stop", { method: "POST" }),
   frame: (cam: string) => j<Frame>(`/api/frame/${cam}`),
   stats: () => j<Stats>("/api/stats"),
+  occupancy: (date?: string) => j<Occupancy>(`/api/occupancy${date ? `?date=${encodeURIComponent(date)}` : ""}`),
   hourly: () => j<Hourly>("/api/hourly"),
   zoneActivity: () => j<ZoneActivity[]>("/api/zones_activity"),
   activity: (date: string, page = 1) => j<Activity>(`/api/activity?date=${encodeURIComponent(date)}&page=${page}`),

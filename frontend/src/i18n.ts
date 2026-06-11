@@ -17,7 +17,7 @@ const dict = {
     live: {
       title: "Live Operations", customers: "Customers", staff: "Staff", alerts: "Alerts", device: "Device",
       recentAlerts: "Recent Alerts", noAlerts: "No alerts yet.",
-      viewSingle: "Single", viewGrid: "Grid",
+      viewSingle: "Single", viewGrid: "Grid", camStart: "Start", camStop: "Stop",
     },
     dash: {
       title: "Dashboard", totalVisitors: "Total Visitors", interested: "Interested",
@@ -26,6 +26,11 @@ const dict = {
       csv: "Export CSV", pdf: "Export PDF", date: "Date",
       time: "Time", person: "Person", zone: "Zone", behavior: "Behavior", alert: "Alert",
       page: "Page", of: "of", source: "Source",
+    },
+    occ: {
+      title: "Live Occupancy", now: "People now", live: "Live", peak: "Today's peak",
+      avg: "Today's average", at: "at", hourly: "Peak occupancy by hour",
+      byZone: "By zone", offline: "Engine stopped",
     },
     zones: {
       title: "Zone Editor", name: "Zone name", category: "Category", points: "Points",
@@ -64,7 +69,7 @@ const dict = {
     live: {
       title: "การทำงานสด", customers: "ลูกค้า", staff: "พนักงาน", alerts: "แจ้งเตือน", device: "อุปกรณ์",
       recentAlerts: "แจ้งเตือนล่าสุด", noAlerts: "ยังไม่มีการแจ้งเตือน",
-      viewSingle: "กล้องเดียว", viewGrid: "ตาราง",
+      viewSingle: "กล้องเดียว", viewGrid: "ตาราง", camStart: "เริ่ม", camStop: "หยุด",
     },
     dash: {
       title: "แดชบอร์ด", totalVisitors: "ผู้เข้าชมรวม", interested: "สนใจ",
@@ -73,6 +78,11 @@ const dict = {
       csv: "ส่งออก CSV", pdf: "ส่งออก PDF", date: "วันที่",
       time: "เวลา", person: "บุคคล", zone: "โซน", behavior: "พฤติกรรม", alert: "แจ้งเตือน",
       page: "หน้า", of: "จาก", source: "แหล่งข้อมูล",
+    },
+    occ: {
+      title: "คนในพื้นที่ (เรียลไทม์)", now: "คนตอนนี้", live: "สด", peak: "พีคของวันนี้",
+      avg: "เฉลี่ยวันนี้", at: "เวลา", hourly: "พีคจำนวนคนรายชั่วโมง",
+      byZone: "ตามโซน", offline: "ระบบหยุดทำงาน",
     },
     zones: {
       title: "แก้ไขโซน", name: "ชื่อโซน", category: "หมวดหมู่", points: "จุด",

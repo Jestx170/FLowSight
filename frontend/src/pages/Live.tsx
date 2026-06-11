@@ -32,7 +32,19 @@ export function LivePage() {
     setBusy(false);
   };
 
+  // Per-camera start/stop. `cams` is polled, so the running dot updates on its own.
+  const [camBusy, setCamBusy] = useState<Record<string, boolean>>({});
+  const toggleCam = async (camId: string, isRunning: boolean) => {
+    setCamBusy((m) => ({ ...m, [camId]: true }));
+    try {
+      if (isRunning) await api.stop(camId);
+      else await api.start(camId);
+    } catch (e) { console.error(e); }
+    setCamBusy((m) => ({ ...m, [camId]: false }));
+  };
+
   const recent = (alerts.data ?? []).slice(0, 30);
+  const activeCamObj = cameras.find((c) => c.id === activeCam);
 
   return (
     <div className="space-y-6">
@@ -72,16 +84,27 @@ export function LivePage() {
                 </button>
               ))}
             </div>
-            {/* view toggle: Single | Grid */}
-            <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 shrink-0">
-              <button onClick={() => setViewMode("single")} title={t.live.viewSingle}
-                className={"inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded " + (view === "single" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
-                <RectangleHorizontal size={13} />{t.live.viewSingle}
-              </button>
-              <button onClick={() => setViewMode("grid")} title={t.live.viewGrid}
-                className={"inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded " + (view === "grid" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
-                <LayoutGrid size={13} />{t.live.viewGrid}
-              </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* per-camera start/stop for the active camera (single view) */}
+              {view === "single" && activeCamObj && (
+                <button onClick={() => toggleCam(activeCamObj.id, !!activeCamObj.running)} disabled={!!camBusy[activeCamObj.id]}
+                  className={"inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border " +
+                    (activeCamObj.running ? "border-destructive/40 text-destructive" : "border-border text-foreground hover:border-primary hover:text-primary")}>
+                  {activeCamObj.running ? <Square size={12} /> : <Play size={12} />}
+                  {activeCamObj.running ? t.live.camStop : t.live.camStart}
+                </button>
+              )}
+              {/* view toggle: Single | Grid */}
+              <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5">
+                <button onClick={() => setViewMode("single")} title={t.live.viewSingle}
+                  className={"inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded " + (view === "single" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
+                  <RectangleHorizontal size={13} />{t.live.viewSingle}
+                </button>
+                <button onClick={() => setViewMode("grid")} title={t.live.viewGrid}
+                  className={"inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded " + (view === "grid" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
+                  <LayoutGrid size={13} />{t.live.viewGrid}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -99,9 +122,17 @@ export function LivePage() {
                 const ch = (hud.data?.cams as any)?.[c.id] ?? {};
                 return (
                   <div key={c.id} className="rounded-md border border-border overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-1.5 bg-surface text-xs">
-                      <span className="font-medium truncate">{c.name || c.id}</span>
-                      <span className={"w-2 h-2 rounded-full " + (c.running ? "bg-[var(--success)]" : "bg-muted-foreground")} />
+                    <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-surface text-xs">
+                      <span className="font-medium truncate flex items-center gap-1.5">
+                        <span className={"w-2 h-2 rounded-full " + (c.running ? "bg-[var(--success)]" : "bg-muted-foreground")} />
+                        {c.name || c.id}
+                      </span>
+                      <button onClick={() => toggleCam(c.id, !!c.running)} disabled={!!camBusy[c.id]}
+                        className={"inline-flex items-center gap-1 px-2 py-0.5 rounded border " +
+                          (c.running ? "border-destructive/40 text-destructive" : "border-border hover:border-primary hover:text-primary")}>
+                        {c.running ? <Square size={11} /> : <Play size={11} />}
+                        {c.running ? t.live.camStop : t.live.camStart}
+                      </button>
                     </div>
                     <div className="bg-[#111] aspect-video flex items-center justify-center">
                       <CameraStream camId={c.id} running={running} />

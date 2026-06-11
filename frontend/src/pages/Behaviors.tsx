@@ -29,7 +29,7 @@ export function BehaviorsPage() {
     setRows((rs) => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));
 
   const addRow = () => setRows((rs) => [...rs, {
-    id: `b_${Date.now()}`, name: "New behavior", zone: "", action: "dwell", threshold: 5, alert: true, color: "#714B67",
+    id: `b_${Date.now()}`, name: "New behavior", zone: "", action: "dwell", threshold: 5, alert: true, color: "#4A4F54",
   }]);
   const removeRow = (i: number) => setRows((rs) => rs.filter((_, k) => k !== i));
 
@@ -65,7 +65,9 @@ export function BehaviorsPage() {
             return (
               <button key={tpl.key} onClick={() => applyTemplate(tpl.key)} title={info.desc}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-surface hover:border-primary hover:text-primary text-sm transition-colors">
-                <span className="text-lg leading-none">{tpl.icon}</span>
+                {tpl.iconSrc
+                  ? <img src={tpl.iconSrc} alt="" className="w-5 h-5 object-contain" />
+                  : <span className="text-lg leading-none">{tpl.icon}</span>}
                 <span className="font-medium">{info.name}</span>
               </button>
             );

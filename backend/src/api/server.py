@@ -16,6 +16,7 @@ from src.paths import (
     DATA_DIR, CONFIG_DIR, DB_PATH, MODEL_PATH, BYTETRACK,
     ZONES_CONFIG, BEHS_CONFIG, BRAND_CONFIG, TEMPLATES_DIR, STATIC_DIR,
 )
+from src.utils.metrics_sql import VISITOR_KEY, INTERESTED_IN, PURCHASING_IN
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
@@ -106,7 +107,31 @@ _GPU_NAME: str   = ""
 _GPU_VRAM: float = 0.0
 
 def _detect_device() -> str:
-    return "cpu"
+    """Detect CUDA once and cache. Returns '0' (first GPU) or 'cpu'.
+
+    Override with FLOWSIGHT_DEVICE=cpu|0|1… when needed (e.g. to benchmark
+    CPU on a GPU machine). FP16 is enabled automatically on CUDA.
+    """
+    global _DEVICE, _GPU_NAME, _GPU_VRAM
+    forced = os.environ.get("FLOWSIGHT_DEVICE", "").strip()
+    if forced:
+        _DEVICE = forced
+        return _DEVICE
+    try:
+        import torch
+        if torch.cuda.is_available():
+            _DEVICE   = "0"
+            _GPU_NAME = torch.cuda.get_device_name(0)
+            _GPU_VRAM = torch.cuda.get_device_properties(0).total_memory / 1e9
+            log.info("CUDA available: %s (%.1f GB) — GPU inference enabled",
+                     _GPU_NAME, _GPU_VRAM)
+            return _DEVICE
+    except Exception as e:
+        log.warning("CUDA probe failed (%s) — falling back to CPU", e)
+    _DEVICE = "cpu"
+    return _DEVICE
+
+_detect_device()
 
 # Each camera thread creates its own YOLO model instance (see camera_engine_loop).
 # Sharing a single model with persist=True across threads corrupts ByteTrack
@@ -143,6 +168,16 @@ def ensure_db():
         needs_staff   INTEGER NOT NULL DEFAULT 0,
         is_new_visit  INTEGER NOT NULL DEFAULT 1)""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ts ON events(timestamp)")
+    # True concurrent-occupancy samples (one row per OCC_SAMPLE_SEC while
+    # running). Peak/avg occupancy is computed from these instead of the
+    # distinct-visitors-per-minute approximation, which overstated peak by
+    # ~37% and average by ~49% under high visitor churn.
+    conn.execute("""CREATE TABLE IF NOT EXISTS occupancy_snapshots (
+        timestamp REAL    NOT NULL,
+        total     INTEGER NOT NULL,
+        zones     TEXT    NOT NULL DEFAULT '{}',
+        cams      TEXT    NOT NULL DEFAULT '{}')""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_occ_ts ON occupancy_snapshots(timestamp)")
     migrations = [
         "ALTER TABLE events ADD COLUMN zone_name TEXT DEFAULT ''",
         "ALTER TABLE events ADD COLUMN behavior_id TEXT DEFAULT ''",
@@ -183,6 +218,20 @@ def _today_str() -> str:
 
 def _dc() -> str:
     return f"date(datetime(timestamp,'unixepoch','+{TZ} hours'))"
+
+def _day_range(date_str: str) -> tuple[float, float]:
+    """UTC epoch range [t0, t1) covering local calendar date `date_str`.
+
+    Used as `WHERE timestamp >= ? AND timestamp < ?` so queries hit the
+    idx_ts index. The old `WHERE date(datetime(timestamp,...)) = ?` form
+    computed a function per row, forcing a full-table scan — ~4 s per
+    dashboard poll on one day of data and growing with table size.
+    """
+    import datetime
+    d = datetime.datetime.strptime(date_str, "%Y-%m-%d").replace(
+        tzinfo=datetime.timezone.utc)
+    t0 = d.timestamp() - TZ * 3600
+    return t0, t0 + 86400.0
 
 # ── Stream ────────────────────────────────────────────────────────────────────
 _last_frame: list = [None]   # mutable container avoids global keyword
@@ -437,8 +486,8 @@ def api_hud():
         "alert":    total_alrt,
         "zones":    dict(merged_zones),
         "cams":     huds,
-        "device":   "cpu",
-        "gpu_name": None,
+        "device":   "cuda" if _DEVICE != "cpu" else "cpu",
+        "gpu_name": _GPU_NAME or None,
     })
 
 # ── Legacy engine removed — see camera_engine_loop ──────────────────────────────
@@ -454,20 +503,21 @@ def api_stats():
     if not Path(DB_PATH).exists():
         return jsonify({"total": 0, "interested": 0, "purchasing": 0, "top_zone": "—"})
     today = _today_str()
-    dc    = _dc()
+    t0, t1 = _day_range(today)
+    DAY = "timestamp>=? AND timestamp<?"
     try:
         conn = get_conn()
         def q(sql, p=()):
             return conn.execute(sql, p).fetchall()
         try:
-            total = q(f"SELECT COUNT(*) FROM events WHERE is_new_visit=1 AND {dc}=?", (today,))[0][0]
+            total = q(f"SELECT COUNT(*) FROM events WHERE is_new_visit=1 AND {DAY}", (t0, t1))[0][0]
         except Exception:
-            total = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE {dc}=?", (today,))[0][0]
+            total = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE {DAY}", (t0, t1))[0][0]
         if total == 0:
-            total = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE {dc}=?", (today,))[0][0]
-        inter = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE behavior_id='interested' AND {dc}=?", (today,))[0][0]
-        purch = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE behavior_id='checkout_ready' AND {dc}=?", (today,))[0][0]
-        top_z = q(f"SELECT zone_name, COUNT(*) n FROM events WHERE zone!='floor' AND {dc}=? GROUP BY zone_name ORDER BY n DESC LIMIT 1", (today,))
+            total = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE {DAY}", (t0, t1))[0][0]
+        inter = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN {INTERESTED_IN} AND {DAY}", (t0, t1))[0][0]
+        purch = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN {PURCHASING_IN} AND {DAY}", (t0, t1))[0][0]
+        top_z = q(f"SELECT zone_name, COUNT(*) n FROM events WHERE zone!='floor' AND {DAY} GROUP BY zone_name ORDER BY n DESC LIMIT 1", (t0, t1))
         conn.close()
         return jsonify({"total": total, "interested": inter, "purchasing": purch,
                         "top_zone": top_z[0][0] if top_z else "—"})
@@ -479,8 +529,8 @@ def api_stats():
 def api_hourly():
     if not Path(DB_PATH).exists():
         return jsonify({"labels": [], "datasets": []})
-    today = _today_str()
-    dc    = _dc()
+    today  = _today_str()
+    t0, t1 = _day_range(today)
     hf    = f"strftime('%H',datetime(timestamp,'unixepoch','+{TZ} hours'))"
     COLOR_MAP = ["#6366f1","#f59e0b","#22c55e","#ef4444",
                  "#a855f7","#14b8a6","#f97316","#3b82f6"]
@@ -488,8 +538,8 @@ def api_hourly():
         conn = get_conn()
         rows = conn.execute(
             f"SELECT {hf} hr, behavior_name, COUNT(*) n FROM events "
-            f"WHERE {dc}=? GROUP BY hr, behavior_name ORDER BY hr",
-            (today,)).fetchall()
+            f"WHERE timestamp>=? AND timestamp<? GROUP BY hr, behavior_name ORDER BY hr",
+            (t0, t1)).fetchall()
         conn.close()
         labels  = [f"{h:02d}:00" for h in range(24)]
         beh_set = list(dict.fromkeys(r[1] for r in rows if r[1]))
@@ -508,19 +558,102 @@ def api_hourly():
         log.error("api_hourly error: %s", e)
         return jsonify({"labels": [], "datasets": []})
 
+@app.route("/api/occupancy")
+def api_occupancy():
+    """Real-time occupancy + today's peak/average.
+
+    live   — people currently being tracked (from the per-camera HUD), total,
+             per-zone and per-camera. Reflects who is physically present now.
+    today  — peak and average concurrent occupancy plus an hourly series.
+             Occupancy history isn't stored as snapshots, so it's approximated
+             from events: distinct visitors seen per 1-minute bucket ≈ how many
+             were present that minute (tracked people log events continuously).
+    """
+    from collections import Counter
+    # ── Live (from in-memory HUDs) ───────────────────────────────────────────
+    with _cams_lock:
+        huds = dict(_cam_huds)
+    with _state_lock:
+        running = state.get("running", False)
+    live_total = sum(h.get("cust", 0) for h in huds.values())
+    live_zones: Counter = Counter()
+    for h in huds.values():
+        live_zones.update(h.get("zones", {}))
+    live_cams = {cid: h.get("cust", 0) for cid, h in huds.items()}
+
+    # ── Today's peak / average / hourly series ────────────────────────────────
+    # Primary source: occupancy_snapshots (true concurrent headcount sampled
+    # every OCC_SAMPLE_SEC). Fallback for dates predating the snapshot table:
+    # the legacy distinct-visitors-per-minute approximation (overstates under
+    # churn — kept only for historical data).
+    date = request.args.get("date", "") or _today_str()
+    peak, peak_time, avg = 0, "—", 0.0
+    series = [0] * 24
+    if Path(DB_PATH).exists():
+        try:
+            t0, t1 = _day_range(date)
+            conn = get_conn()
+            mf = f"strftime('%H:%M',datetime(timestamp,'unixepoch','+{TZ} hours'))"
+            hf = f"strftime('%H',datetime(timestamp,'unixepoch','+{TZ} hours'))"
+            snaps = conn.execute(
+                f"SELECT {mf} m, {hf} hr, total FROM occupancy_snapshots "
+                f"WHERE timestamp>=? AND timestamp<? ORDER BY timestamp",
+                (t0, t1)).fetchall()
+            if snaps:
+                counts = [r[2] for r in snaps]
+                peak_idx  = max(range(len(snaps)), key=lambda i: snaps[i][2])
+                peak      = snaps[peak_idx][2]
+                peak_time = snaps[peak_idx][0]
+                avg       = round(sum(counts) / len(counts), 1)
+                for m, hr, c in snaps:
+                    if hr is not None and c > series[int(hr)]:
+                        series[int(hr)] = c
+            else:
+                rows = conn.execute(
+                    f"SELECT {mf} m, {hf} hr, COUNT(DISTINCT {VISITOR_KEY}) c "
+                    f"FROM events WHERE timestamp>=? AND timestamp<? "
+                    f"GROUP BY m ORDER BY m", (t0, t1)).fetchall()
+                if rows:
+                    counts = [r[2] for r in rows]
+                    peak_idx   = max(range(len(rows)), key=lambda i: rows[i][2])
+                    peak       = rows[peak_idx][2]
+                    peak_time  = rows[peak_idx][0]
+                    avg        = round(sum(counts) / len(counts), 1)
+                    # Hourly series = peak concurrent occupancy within each hour
+                    # (more useful for staffing than an average of averages).
+                    for m, hr, c in rows:
+                        if hr is not None:
+                            h = int(hr)
+                            if c > series[h]:
+                                series[h] = c
+            conn.close()
+        except Exception as e:
+            log.error("api_occupancy error: %s", e)
+
+    return jsonify({
+        "ok": True,
+        "running": running,
+        "live": {"total": live_total, "zones": dict(live_zones), "cams": live_cams},
+        "today": {
+            "peak": peak, "peak_time": peak_time, "avg": avg,
+            "labels": [f"{h:02d}:00" for h in range(24)],
+            "series": series,
+        },
+    })
+
 @app.route("/api/zones_activity")
 def api_zones_activity():
     if not Path(DB_PATH).exists():
         return jsonify([])
-    today = _today_str()
-    dc    = _dc()
+    today  = _today_str()
+    t0, t1 = _day_range(today)
     try:
         conn = get_conn()
         rows = conn.execute(
             f"SELECT zone_name, COUNT(*) n FROM events "
-            f"WHERE zone!='floor' AND {dc}=? "
+            f"WHERE zone!='floor' AND timestamp>=? AND timestamp<? "
             f"GROUP BY zone_name ORDER BY n DESC LIMIT 10",
-            (today,)).fetchall()
+            (t0, t1)).fetchall()
         conn.close()
         return jsonify([{"zone": r[0] or "unknown", "count": r[1]} for r in rows])
     except Exception as e:
@@ -699,14 +832,13 @@ def api_activity_summary():
             ts1 = datetime.datetime.combine(d, datetime.time.max).timestamp()
             where = "timestamp BETWEEN ? AND ?"; params = [ts0, ts1]
         except Exception: pass
-    total = q(f"SELECT COUNT(DISTINCT person_id) FROM events WHERE {where}", params)[0][0]
-    inter = q(f"""SELECT COUNT(DISTINCT person_id) FROM events WHERE {where}
-        AND (behavior_id LIKE '%interest%' OR behavior_id LIKE '%tasting%'
-          OR behavior_id LIKE '%viewing%' OR behavior_id='interested')""", params)[0][0]
+    total = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE {where}", params)[0][0]
+    inter = q(f"""SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE {where}
+        AND behavior_id IN {INTERESTED_IN}""", params)[0][0]
     alrt  = q(f"SELECT COUNT(*) FROM events WHERE {where} AND needs_staff=1", params)[0][0]
     top   = q(f"""SELECT zone_name, COUNT(*) n FROM events WHERE {where} AND zone_name!=''
         GROUP BY zone_name ORDER BY n DESC LIMIT 1""", params)
-    zones = q(f"""SELECT zone_name, COUNT(DISTINCT person_id) FROM events
+    zones = q(f"""SELECT zone_name, COUNT(DISTINCT {VISITOR_KEY}) FROM events
         WHERE {where} AND zone_name!='' GROUP BY zone_name ORDER BY 2 DESC""", params)
     return jsonify({"ok": True, "total": total, "interested": inter,
         "interested_pct": round(inter/total*100) if total else 0,
@@ -802,7 +934,8 @@ def api_insight():
             gemini_key = state.get("gemini_api_key", "") or os.environ.get("GEMINI_API_KEY", "")
             claude_key = state.get("claude_api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
         result = get_ai_insight(DB_PATH, request.args.get("date"),
-                                api_key=gemini_key or claude_key)
+                                api_key=gemini_key or claude_key,
+                                brand_name=load_brand().get("name", "this retail store"))
         return jsonify({"ok": result["ok"],
                         "html": insight_to_html(result.get("insight") or
                                                 result.get("fallback", "")),
@@ -842,18 +975,31 @@ def api_heatmap_reset():
 @app.route("/api/heatmap/zones")
 def api_heatmap_zones():
     cam_id = request.args.get("cam", "cam_0")
-    if cam_id not in _heat_engines:
+    engine = _heat_engines.get(cam_id)
+    if engine is None:
         return jsonify([])
     from src.engine.zones import ZoneManager
     zm    = ZoneManager(ZONES_CONFIG)
     polys = zm.get_polygons(cam_id)
     meta  = zm.get_meta(cam_id)
-    scores = _heat_engines[cam_id].get_top_zones(polys)
+    # Zone polygons are stored in the authoring resolution (zones_config _meta),
+    # but the heat map accumulates in the camera's native pixel space. Scale the
+    # polygons into native space before scoring, or the heat is sampled from the
+    # wrong region (e.g. only the top-left quadrant when native > authoring).
+    aw, ah = zm.get_author_size()
+    if aw > 0 and ah > 0:
+        sx, sy = engine.w / aw, engine.h / ah
+        polys = {zid: (poly.astype(float) * [sx, sy]).astype(np.int32)
+                 for zid, poly in polys.items()}
+    scores = engine.get_top_zones(polys)
     result = []
-    for zid, score in scores:
+    for zid, mass, density in scores:
         m = meta.get(zid, {})
+        # Ranked by mass (∝ people in zone). "score" stays for UI back-compat
+        # but now carries the ranking value; density exposed separately.
         result.append({"zone_id": zid, "name": m.get("name", zid),
-                        "score": round(score, 2)})
+                        "score": round(mass, 2),
+                        "density": round(density, 2)})
     return jsonify(result)
 
 # ── Demo Image ────────────────────────────────────────────────────────────────
@@ -974,39 +1120,74 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
     log.info("[Cam:%s] Connecting to: %s", cam_id, rtsp[:40] + "...")
     set_status(False, "Connecting...")
 
-    cap = cv2.VideoCapture(rtsp, cv2.CAP_FFMPEG)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    # Limit how long cap.read() blocks so the grab thread can exit promptly
-    # when stop_event fires.  3 s matches the grab_thread.join() buffer below.
-    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)   # 10 s to open stream
-    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC,  3_000)   # 3 s max per frame read
-    if not cap.isOpened():
-        log.error("[Cam:%s] Cannot open stream", cam_id)
-        set_status(False, "Cannot open stream")
+    RECONNECT_INTERVAL = 5
+
+    def _open_stream() -> "cv2.VideoCapture | None":
+        """Open the capture, retrying every RECONNECT_INTERVAL until it
+        succeeds or stop_event fires. A camera that is offline (at startup or
+        mid-run) therefore recovers automatically as soon as it is reachable
+        again, instead of staying down until a human presses start."""
+        attempt = 0
+        while not stop_event.is_set():
+            c = cv2.VideoCapture(rtsp, cv2.CAP_FFMPEG)
+            c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            # Limit how long cap.read() blocks so the grab thread can exit
+            # promptly when stop_event fires (matches grab_thread.join buffer).
+            c.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)   # 10 s to open
+            c.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC,  3_000)   # 3 s per read
+            if c.isOpened():
+                return c
+            c.release()
+            attempt += 1
+            log.warning("[Cam:%s] Cannot open stream (attempt %d) — retry in %ds",
+                        cam_id, attempt, RECONNECT_INTERVAL)
+            set_status(False, f"Reconnecting (attempt {attempt})...")
+            if stop_event.wait(RECONNECT_INTERVAL):
+                break
+        return None
+
+    cap = _open_stream()
+    if cap is None:
+        set_status(False, "Stopped")
         return
 
     log.info("[Cam:%s] Stream opened OK", cam_id)
     set_status(True, "Running")
 
-    # CPU-only — limit OpenMP threads to avoid context-switch thrash across cameras.
-    device = "cpu"
-    try:
-        import torch
-        with _state_lock:
-            num_cams = max(1, sum(
-                1 for c in state.get("cameras", [{"id": "cam_0"}])
-                if c.get("enabled", True)
-            ))
-        torch.set_num_threads(max(1, os.cpu_count() // num_cams))
-        log.info("[Cam:%s] CPU mode — torch threads: %d", cam_id,
-                 max(1, os.cpu_count() // num_cams))
-    except Exception:
-        pass
+    # Device: CUDA when available (detected once at startup), CPU otherwise.
+    device   = _DEVICE
+    use_half = device != "cpu"   # FP16 ~2x faster on RTX-class GPUs
+    if device == "cpu":
+        # CPU-only — limit OpenMP threads to avoid context-switch thrash
+        # across cameras.
+        try:
+            import torch
+            with _state_lock:
+                num_cams = max(1, sum(
+                    1 for c in state.get("cameras", [{"id": "cam_0"}])
+                    if c.get("enabled", True)
+                ))
+            torch.set_num_threads(max(1, os.cpu_count() // num_cams))
+            log.info("[Cam:%s] CPU mode — torch threads: %d", cam_id,
+                     max(1, os.cpu_count() // num_cams))
+            # Measured ceiling on an 8-core CPU is ~28-30 total inference fps;
+            # beyond ~6 cameras per-camera fps falls under 5 and latency grows
+            # unboundedly. Warn loudly instead of degrading silently.
+            if num_cams > 6:
+                log.warning("[Cam:%s] %d cameras enabled on CPU — exceeds the "
+                            "~6-camera capacity of one CPU instance; expect <5 fps "
+                            "per camera. Use a GPU or split cameras across instances.",
+                            cam_id, num_cams)
+        except Exception:
+            pass
+    else:
+        log.info("[Cam:%s] GPU mode — %s (%.1f GB), FP16", cam_id,
+                 _GPU_NAME, _GPU_VRAM)
 
     try:
         from ultralytics import YOLO
         model = YOLO(MODEL_PATH)
-        log.info("[Cam:%s] YOLO loaded on CPU", cam_id)
+        log.info("[Cam:%s] YOLO loaded (device=%s)", cam_id, device)
     except Exception as e:
         log.error("[Cam:%s] YOLO load failed: %s", cam_id, e)
         set_status(False, f"YOLO error: {e}")
@@ -1021,26 +1202,33 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
     engine   = BehaviorInferenceEngine(ZONES_CONFIG, BEHS_CONFIG)
     logger   = BehaviorLogger(DB_PATH)
     zm       = ZoneManager(ZONES_CONFIG)
+    aw, ah   = zm.get_author_size()
     from src.utils.heatmap import HeatMapEngine
     # Use actual frame resolution so person coordinates aren't clipped
     _fh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
     _fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or 1280
-    _heat_engines[cam_id] = HeatMapEngine(width=_fw, height=_fh, decay=0.998)
+    # half_life_sec=20: live crowd-density map — a vacated spot's heat halves
+    # every 20 s (frame-rate independent), instead of lingering ~11 min as the
+    # old frame-count decay did.
+    _heat_engines[cam_id] = HeatMapEngine(width=_fw, height=_fh, half_life_sec=20.0)
     heat_eng = _heat_engines[cam_id]
 
     import time as _time
     from collections import Counter
 
-    RECONNECT_INTERVAL = 5
     CLEANUP_EVERY      = 150   # flush stale state every ~10 s at 15 fps
+    NO_FRAME_TIMEOUT   = 15.0  # no new frame for this long => stream is dead
     fail_count = 0
     MAX_FAILS  = 30
     frame_no   = 0
 
     # ── Dedicated frame-grabber thread ────────────────────────────────────
     # Drains the RTSP buffer continuously so the inference loop always gets
-    # the latest frame instead of a buffered one.
+    # the latest frame instead of a buffered one.  _frame_seq lets the main
+    # loop tell a NEW frame from a stale one, so a stalled stream is detected
+    # instead of re-running inference on the same image forever.
     _latest_frame = [None]
+    _frame_seq    = [0]
     _frame_lock   = threading.Lock()
     _grab_stop    = threading.Event()
 
@@ -1051,47 +1239,68 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
             if ret:
                 with _frame_lock:
                     _latest_frame[0] = frame
+                    _frame_seq[0]   += 1
                 fail_count = 0
             else:
                 fail_count += 1
                 _time.sleep(0.01)
 
-    grab_thread = threading.Thread(target=_grab_loop, daemon=True,
-                                   name=f"grab_{cam_id}")
-    grab_thread.start()
+    def _start_grabber():
+        t = threading.Thread(target=_grab_loop, daemon=True,
+                             name=f"grab_{cam_id}")
+        t.start()
+        return t
+
+    grab_thread = _start_grabber()
     _time.sleep(0.5)   # give grabber time to fill the first frame
 
     # ── Main inference loop ───────────────────────────────────────────────
+    last_seq    = 0
+    last_new_ts = _time.monotonic()
     while not stop_event.is_set():
         with _frame_lock:
             frame = _latest_frame[0]
+            seq   = _frame_seq[0]
 
-        if frame is None:
-            _time.sleep(0.05)
-            continue
+        fresh = (seq != last_seq)
+        if fresh:
+            last_seq    = seq
+            last_new_ts = _time.monotonic()
 
-        # Reconnect on persistent read failures
-        if fail_count >= MAX_FAILS:
-            log.warning("[Cam:%s] Too many failures — reconnecting", cam_id)
-            _grab_stop.set()
-            grab_thread.join(timeout=3.0)
-            cap.release()
-            _time.sleep(RECONNECT_INTERVAL)
-            cap = cv2.VideoCapture(rtsp, cv2.CAP_FFMPEG)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)
-            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC,  3_000)
-            fail_count = 0
-            _grab_stop.clear()
-            _latest_frame[0] = None
-            if not cap.isOpened():
-                set_status(False, "Reconnect failed")
+        # Nothing new to process — decide between waiting and reconnecting.
+        # (Checked only when idle so a buffered frame is always processed
+        # before any reconnect tears the grabber down.)
+        if frame is None or not fresh:
+            # Reconnect on persistent read failures OR a silently stalled
+            # stream (opened but never delivering frames). _open_stream()
+            # retries until the camera is reachable again or the user stops
+            # it, so a single failed attempt can no longer leave the camera
+            # down permanently.
+            stalled = (_time.monotonic() - last_new_ts) > NO_FRAME_TIMEOUT
+            if fail_count >= MAX_FAILS or stalled:
+                log.warning("[Cam:%s] Stream lost (%s) — reconnecting", cam_id,
+                            "read failures" if fail_count >= MAX_FAILS
+                            else "no new frames for %.0fs" % NO_FRAME_TIMEOUT)
+                set_status(False, "Reconnecting...")
+                _grab_stop.set()
+                grab_thread.join(timeout=5.0)
+                cap.release()
+                if stop_event.wait(RECONNECT_INTERVAL):
+                    break
+                cap = _open_stream()  # blocks, retrying, until opened or stopped
+                if cap is None:
+                    break             # stop requested during reconnect
+                fail_count = 0
+                with _frame_lock:
+                    _latest_frame[0] = None
+                _grab_stop.clear()
+                grab_thread = _start_grabber()
+                set_status(True, "Reconnected")
+                last_new_ts = _time.monotonic()
+                _time.sleep(0.5)
                 continue
-            grab_thread = threading.Thread(target=_grab_loop, daemon=True,
-                                           name=f"grab_{cam_id}")
-            grab_thread.start()
-            set_status(True, "Reconnected")
-            _time.sleep(0.5)
+            # Stream still healthy — just wait for the grabber.
+            _time.sleep(0.02)
             continue
 
         # Re-read settings on every iteration so UI changes take effect
@@ -1120,7 +1329,14 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
                     if c.get("enabled", True)
                 ))
             if _imgsz <= 0:
-                _imgsz = 1280 if _ncams <= 2 else (960 if _ncams <= 4 else 640)
+                if device == "cpu":
+                    # CPU: scale down with camera count to keep >=5 fps/cam
+                    _imgsz = 1280 if _ncams <= 2 else (960 if _ncams <= 4 else 640)
+                else:
+                    # GPU: compute is cheap; the constraint is VRAM headroom
+                    # for concurrent per-camera activations. 960 keeps small/
+                    # distant people detectable at 18 cams within ~12 GB.
+                    _imgsz = 1280 if _ncams <= 4 else 960
 
             # No lock needed — each camera has its own model instance so
             # ByteTrack state is fully isolated and concurrent calls are safe.
@@ -1130,8 +1346,8 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
                 conf=conf,
                 classes=[0],
                 imgsz=_imgsz,
-                device="cpu",
-                half=False,
+                device=device,
+                half=use_half,
                 tracker=bt_yaml,
                 verbose=False,
             )
@@ -1149,7 +1365,17 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
                 states[person["state_key"]] = st   # dict so draw_overlay.get() works
                 zone_display = meta.get(st.zone, {}).get("name", st.zone)
                 logger.log(st, cam_id, zone_display)
-                check_alert(st, cam_id)
+                if check_alert(st, cam_id):
+                    import datetime as _dt
+                    with alerts_lock:
+                        alerts.append({
+                            "time":        _dt.datetime.now().strftime("%H:%M:%S"),
+                            "person":      str(st.person_id),
+                            "zone":        zone_display,
+                            "behavior":    st.behavior_name or st.behavior_id or "",
+                            "behavior_id": st.behavior_id or "",
+                        })
+                        del alerts[:-MAX_ALERTS]
                 # Debug: log zone + behavior every 30 frames so you can verify detection
                 if frame_no % 30 == 0:
                     cx, cy = person["center"]
@@ -1167,6 +1393,7 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
                 # Reload behaviors and zones so UI changes take effect without restart
                 engine.reload_behaviors()
                 zm = ZoneManager(ZONES_CONFIG)
+                aw, ah = zm.get_author_size()
 
             # ── Per-zone headcount ────────────────────────────────────────
             zone_counts = Counter(
@@ -1175,7 +1402,8 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
             )
 
             # ── Annotate display frame ────────────────────────────────────
-            annotated = draw_overlay(frame.copy(), people, states, polys, meta, anon)
+            annotated = draw_overlay(frame.copy(), people, states, polys, meta, anon,
+                                     author_w=aw, author_h=ah)
             annotated = draw_hud(annotated, cam_id, states)
 
             # ── Publish results ───────────────────────────────────────────
@@ -1205,7 +1433,8 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
     grab_thread.join(timeout=5.0)
     if grab_thread.is_alive():
         log.warning("[Cam:%s] Grab thread still alive after 5 s — forcing cap release", cam_id)
-    cap.release()
+    if cap is not None:
+        cap.release()
     cap = None   # prevent any stale reference from reusing the handle
     logger.close()
     set_status(False, "Stopped")
@@ -1216,11 +1445,83 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
 # occupies :5000). Default stays 5000 for Windows/Docker.
 PORT = int(os.environ.get("FLOWSIGHT_PORT", os.environ.get("PORT", "5000")))
 
+OCC_SAMPLE_SEC = 15   # true-occupancy snapshot cadence (5,760 rows / 24 h)
+
+def _occupancy_sampler_loop():
+    """Record true concurrent occupancy every OCC_SAMPLE_SEC while running.
+
+    One row per sample: total people now + per-zone + per-camera breakdown.
+    This is the ground truth for /api/occupancy peak & average — unlike the
+    legacy events-based approximation it cannot be inflated by visitor churn
+    or track-ID fragmentation.
+    """
+    import time as _t
+    while True:
+        _t.sleep(OCC_SAMPLE_SEC)
+        try:
+            with _state_lock:
+                running = state.get("running", False)
+            if not running:
+                continue
+            with _cams_lock:
+                huds = {cid: dict(h) for cid, h in _cam_huds.items()}
+            if not huds:
+                continue
+            total = sum(h.get("cust", 0) for h in huds.values())
+            from collections import Counter
+            zones: Counter = Counter()
+            for h in huds.values():
+                zones.update(h.get("zones", {}))
+            cams = {cid: h.get("cust", 0) for cid, h in huds.items()}
+            conn = get_conn()
+            conn.execute(
+                "INSERT INTO occupancy_snapshots (timestamp,total,zones,cams) "
+                "VALUES (?,?,?,?)",
+                (time.time(), total, json.dumps(dict(zones)), json.dumps(cams)))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            log.error("[OccSampler] %s", e)
+
+
+def _maintenance_loop():
+    """Daily: PDPA cleanup + SQLite backup. Runs at startup then every midnight."""
+    import datetime as _dt, sqlite3 as _sq3, time as _t
+    from src.utils.data_manager import DataManager
+    dm = DataManager()
+    while True:
+        try:
+            dm.run_daily_cleanup()
+            # Backup DB (skip if today's backup already exists)
+            backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            bpath = os.path.join(backup_dir, f"flowsight_{_dt.date.today().isoformat()}.db")
+            if not os.path.exists(bpath) and os.path.exists(DB_PATH):
+                src = _sq3.connect(DB_PATH)
+                dst = _sq3.connect(bpath)
+                src.backup(dst)
+                src.close(); dst.close()
+                # Keep last 7 daily backups
+                all_b = sorted(f for f in os.listdir(backup_dir) if f.endswith(".db"))
+                for old in all_b[:-7]:
+                    os.remove(os.path.join(backup_dir, old))
+                log.info("[Backup] %s", bpath)
+        except Exception as _e:
+            log.error("[Maintenance] %s", _e)
+        # Sleep until next midnight + 5 min
+        _now = _dt.datetime.now()
+        _next = (_now + _dt.timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+        _t.sleep((_next - _now).total_seconds())
+
+
 if __name__ == "__main__":
     brand = load_brand()
     print(f"\n{'='*52}")
     print(f"  {brand['name']} — {brand.get('tagline', '')}")
     print(f"  http://localhost:{PORT}")
     print(f"{'='*52}\n")
+
+    threading.Thread(target=_maintenance_loop, daemon=True, name="maintenance").start()
+    threading.Thread(target=_occupancy_sampler_loop, daemon=True, name="occ_sampler").start()
 
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

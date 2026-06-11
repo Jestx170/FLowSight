@@ -145,6 +145,16 @@ class ZoneManager:
             qx = cx * self._author_w / frame_w
             qy = cy * self._author_h / frame_h
         else:
+            # Without the frame size the point is assumed to already be in
+            # authoring space — on a camera streaming at a different
+            # resolution this mis-assigns ~60% of points (QA audit), so make
+            # the omission impossible to miss.
+            if not getattr(self, "_warned_no_frame_size", False):
+                self._warned_no_frame_size = True
+                log.warning("get_zone_and_cat called without frame_w/frame_h — "
+                            "zone lookup assumes authoring resolution %dx%d; "
+                            "pass the native frame size to avoid mis-assignment",
+                            self._author_w, self._author_h)
             qx, qy = float(cx), float(cy)
 
         pt = (qx, qy)

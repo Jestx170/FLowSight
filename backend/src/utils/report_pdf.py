@@ -6,6 +6,8 @@ import sqlite3, os
 from datetime import datetime
 from pathlib import Path
 
+from src.utils.metrics_sql import VISITOR_KEY, INTERESTED_IN, PURCHASING_IN
+
 TZ = 7
 
 def query(conn, sql, p=()):
@@ -33,22 +35,22 @@ def build_pdf(db_path: str, date_filter: str = None, out_path: str = None):
     try:
         total = query(conn, f"SELECT COUNT(*) FROM events WHERE is_new_visit=1 {wh}", p)[0][0]
         if total == 0:
-            total = query(conn, f"SELECT COUNT(DISTINCT person_id) FROM events WHERE 1=1 {wh}", p)[0][0]
+            total = query(conn, f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE 1=1 {wh}", p)[0][0]
     except Exception:
         total = 0
 
+    # Visitor counts use (cam_key, person_id) and the shared interested/purchasing
+    # id sets (src/utils/metrics_sql.py) so the PDF matches /api/stats and the
+    # AI insight for the same day.
     try:
-        inter = query(conn, f"""SELECT COUNT(DISTINCT person_id) FROM events
-            WHERE (behavior_id LIKE '%interest%' OR behavior_id='interested'
-                   OR behavior_id LIKE '%tasting%' OR behavior_id LIKE '%viewing%'
-                   OR behavior_id LIKE '%engaged%') {wh}""", p)[0][0]
+        inter = query(conn, f"""SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events
+            WHERE behavior_id IN {INTERESTED_IN} {wh}""", p)[0][0]
     except Exception:
         inter = 0
 
     try:
-        purch = query(conn, f"""SELECT COUNT(DISTINCT person_id) FROM events
-            WHERE (behavior_id LIKE '%checkout%' OR behavior_id='checkout_ready'
-                   OR behavior_id='purchasing') {wh}""", p)[0][0]
+        purch = query(conn, f"""SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events
+            WHERE behavior_id IN {PURCHASING_IN} {wh}""", p)[0][0]
     except Exception:
         purch = 0
 
@@ -69,7 +71,7 @@ def build_pdf(db_path: str, date_filter: str = None, out_path: str = None):
 
     hourly = query(conn, f"""SELECT
         strftime('%H',datetime(timestamp,'unixepoch','+{TZ} hours')) hr,
-        COUNT(DISTINCT person_id) n
+        COUNT(DISTINCT {VISITOR_KEY}) n
         FROM events WHERE 1=1 {wh} GROUP BY hr ORDER BY hr""", p)
 
     try:
