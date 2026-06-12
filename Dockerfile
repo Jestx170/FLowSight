@@ -4,6 +4,16 @@
 # Targets Mac/Apple Silicon (linux/arm64) and Linux/amd64.  Runs the Flask
 # server only — webcam/GUI modes are not usable in a container on Mac, but
 # RTSP/network cameras work fine.
+#
+# CPU vs GPU image:
+#   default (CPU)      — small image; Mac dev / machines without NVIDIA GPU
+#   GPU (NVIDIA/CUDA)  — build + run with the override file:
+#       docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#     The override passes TORCH_INDEX_URL=https://pypi.org/simple so pip
+#     resolves the default Linux x86_64 torch wheel (bundles CUDA runtime —
+#     no CUDA toolkit needed in the image), and reserves the GPU for the
+#     container. Host needs the NVIDIA driver; on Windows use Docker Desktop
+#     with the WSL2 backend.
 # =============================================================================
 
 # ── stage 1: build the React SPA ──────────────────────────────────────────────
@@ -26,6 +36,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Torch flavor — installed BEFORE ultralytics so its dependency resolution
+# sees torch already present and keeps this flavor:
+#   CPU (default): https://download.pytorch.org/whl/cpu   (small, no CUDA)
+#   GPU:           https://pypi.org/simple                (default Linux wheel
+#                  bundles the CUDA runtime; set by docker-compose.gpu.yml)
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch torchvision --index-url ${TORCH_INDEX_URL}
 
 # Python deps.  ultralytics depends on full opencv-python (needs libGL), so we
 # install everything, drop the GUI build, then force the headless build last so

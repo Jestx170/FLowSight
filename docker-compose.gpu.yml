@@ -1,0 +1,29 @@
+# =============================================================================
+# FlowSight — GPU override (NVIDIA/CUDA, e.g. Windows + RTX 3060)
+#
+# Usage (build + run the GPU image and give the container the GPU):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+#
+# Requirements on the host:
+#   - NVIDIA driver installed (no CUDA toolkit needed — bundled in the wheel)
+#   - Windows: Docker Desktop with the WSL2 backend (Settings → General)
+#   - Verify after start:  docker logs flowsight | findstr CUDA
+#     must show: "CUDA available: NVIDIA GeForce RTX 3060 (... GB)"
+# =============================================================================
+services:
+  flowsight:
+    build:
+      context: .
+      args:
+        # Default Linux x86_64 torch wheel from PyPI bundles the CUDA runtime.
+        TORCH_INDEX_URL: https://pypi.org/simple
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # GPU does the inference — CPU budget is for RTSP decode + tracking only.
+    cpus: "12.0"
+    mem_limit: 8g

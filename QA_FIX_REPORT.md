@@ -154,7 +154,9 @@
 3. `pip install ultralytics flask reportlab opencv-python`
 4. ตรวจหลัง start: log ต้องขึ้น `CUDA available: NVIDIA GeForce RTX 3060 (12.0 GB) — GPU inference enabled` และ `/api/hud` ต้องรายงาน `"device": "cuda"`
 5. **ต้องรัน stress test ซ้ำบนเครื่องจริง** (สคริปต์ `/tmp/qa_phase5_stress.py` ปรับ device ได้) เพราะตัวเลข GPU ข้างบนเป็นการประเมิน ยังไม่ได้วัดจริง — เครื่องที่ audit ไม่มี NVIDIA
-6. หมายเหตุ Docker: `Dockerfile` ปัจจุบันเป็น CPU (headless) — บน Windows แนะนำรัน native จะได้ใช้ GPU ตรงๆ
+6. **Docker (รองรับ GPU แล้ว):** build ปกติยังเป็น CPU image เล็กเหมือนเดิม ส่วน GPU ใช้ override file:
+   `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d`
+   (ติดตั้ง torch แบบ CUDA ใน image + reserve GPU ให้ container; ต้องใช้ Docker Desktop แบบ WSL2 backend + NVIDIA driver บน host) — ตรวจด้วย `docker logs flowsight | findstr CUDA` ต้องเห็น `CUDA available: NVIDIA GeForce RTX 3060` หรือจะรัน native ตามข้อ 1–4 ก็ได้เหมือนกัน
 
 ## 5. ข้อจำกัดที่เหลือ
 
@@ -174,6 +176,8 @@
 | `backend/src/api/server.py` | `_open_stream()` retry-forever, frame-seq stall detection + process-before-reconnect ordering, `_day_range()` + range queries ทุก endpoint, ตาราง+sampler `occupancy_snapshots`, `/api/occupancy` snapshot-first, `/api/heatmap/zones` mass ranking, CUDA auto-detect + FP16 + GPU imgsz rule, `/api/hud` รายงาน device จริง, capacity warning |
 | `backend/src/engine/zones.py` | warning เมื่อเรียกโดยไม่ส่ง frame size |
 | `backend/src/utils/data_manager.py` | ลบ `occupancy_snapshots` เก่าใน daily cleanup |
+| `Dockerfile` | build arg `TORCH_INDEX_URL` เลือก torch CPU (default) หรือ CUDA |
+| `docker-compose.gpu.yml` | (ใหม่) override สำหรับ GPU: CUDA torch build + NVIDIA device reservation |
 
 ## 7. Test harness
 
