@@ -47,6 +47,10 @@ class BehaviorLogger:
         # all subsequent writes happen on the writer thread only.
         conn = sqlite3.connect(db_path)
         conn.execute("PRAGMA journal_mode=WAL")
+        # synchronous=FULL so a committed batch survives a power loss / hard
+        # reset, not just an app/OS crash (WAL+NORMAL can roll back the last
+        # commits on power loss).
+        conn.execute("PRAGMA synchronous=FULL")
         conn.execute(CREATE_SQL)
         conn.execute(INDEX_SQL)
         conn.commit()
@@ -122,6 +126,7 @@ class BehaviorLogger:
             if conn is None:
                 conn = sqlite3.connect(self._db_path, timeout=5)
                 conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=FULL")
             conn.executemany(
                 "INSERT INTO events "
                 "(timestamp,cam_key,person_id,zone,zone_name,"

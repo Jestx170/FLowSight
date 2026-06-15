@@ -56,6 +56,7 @@ else:
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
+REPORTS_DIR  = str(DATA_DIR / "reports")
 DB_PATH      = str(DATA_DIR / "behavior_log.db")
 ZONES_CONFIG = str(CONFIG_DIR / "zones_config.json")
 BEHS_CONFIG  = str(CONFIG_DIR / "behaviors_config.json")

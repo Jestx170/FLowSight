@@ -15,6 +15,7 @@ from src import paths
 from src.paths import (
     DATA_DIR, CONFIG_DIR, DB_PATH, MODEL_PATH, BYTETRACK,
     ZONES_CONFIG, BEHS_CONFIG, BRAND_CONFIG, TEMPLATES_DIR, STATIC_DIR,
+    REPORTS_DIR,
 )
 from src.utils.metrics_sql import VISITOR_KEY, INTERESTED_IN, PURCHASING_IN
 
@@ -152,6 +153,10 @@ app = Flask(__name__,
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.execute("PRAGMA journal_mode=WAL")
+    # synchronous=FULL: every committed transaction is fsync'd, so a power
+    # loss or hard reset can never lose a row that was already committed
+    # (WAL+NORMAL stays corruption-free but may roll back the last commits).
+    conn.execute("PRAGMA synchronous=FULL")
     return conn
 
 def ensure_db():
@@ -835,7 +840,10 @@ def api_activity_summary():
     total = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE {where}", params)[0][0]
     inter = q(f"""SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE {where}
         AND behavior_id IN {INTERESTED_IN}""", params)[0][0]
-    alrt  = q(f"SELECT COUNT(*) FROM events WHERE {where} AND needs_staff=1", params)[0][0]
+    # Distinct people who needed staff — not raw event rows. The v2 logger
+    # heartbeats every 5 s while a person dwells in an alerting behaviour, so
+    # COUNT(*) inflates one sustained alert into dozens of rows.
+    alrt  = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE {where} AND needs_staff=1", params)[0][0]
     top   = q(f"""SELECT zone_name, COUNT(*) n FROM events WHERE {where} AND zone_name!=''
         GROUP BY zone_name ORDER BY n DESC LIMIT 1""", params)
     zones = q(f"""SELECT zone_name, COUNT(DISTINCT {VISITOR_KEY}) FROM events
@@ -972,35 +980,55 @@ def api_heatmap_reset():
         engine.reset()
     return jsonify({"ok": True})
 
+def _scaled_zone_polys(engine, cam_id: str) -> dict:
+    """Zone polygons for cam_id, scaled into the heat engine's native pixel
+    space and keyed for HeatMapEngine.get_top_zones / generate_report.
+
+    Zone polygons are stored in the authoring resolution (zones_config _meta),
+    but the heat map accumulates in the camera's native pixel space. Scale the
+    polygons into native space before scoring, or the heat is sampled from the
+    wrong region (e.g. only the top-left quadrant when native > authoring).
+
+    Returns {zone_id: {"poly": ndarray, "name": str}}.
+    """
+    from src.engine.zones import ZoneManager
+    zm    = ZoneManager(ZONES_CONFIG)
+    polys = zm.get_polygons(cam_id)
+    meta  = zm.get_meta(cam_id)
+    aw, ah = zm.get_author_size()
+    if aw > 0 and ah > 0:
+        sx, sy = engine.w / aw, engine.h / ah
+        polys = {zid: (poly.astype(float) * [sx, sy]).astype(np.int32)
+                 for zid, poly in polys.items()}
+    return {zid: {"poly": poly, "name": meta.get(zid, {}).get("name", zid)}
+            for zid, poly in polys.items()}
+
 @app.route("/api/heatmap/zones")
 def api_heatmap_zones():
     cam_id = request.args.get("cam", "cam_0")
     engine = _heat_engines.get(cam_id)
     if engine is None:
         return jsonify([])
-    from src.engine.zones import ZoneManager
-    zm    = ZoneManager(ZONES_CONFIG)
-    polys = zm.get_polygons(cam_id)
-    meta  = zm.get_meta(cam_id)
-    # Zone polygons are stored in the authoring resolution (zones_config _meta),
-    # but the heat map accumulates in the camera's native pixel space. Scale the
-    # polygons into native space before scoring, or the heat is sampled from the
-    # wrong region (e.g. only the top-left quadrant when native > authoring).
-    aw, ah = zm.get_author_size()
-    if aw > 0 and ah > 0:
-        sx, sy = engine.w / aw, engine.h / ah
-        polys = {zid: (poly.astype(float) * [sx, sy]).astype(np.int32)
-                 for zid, poly in polys.items()}
-    scores = engine.get_top_zones(polys)
-    result = []
-    for zid, mass, density in scores:
-        m = meta.get(zid, {})
-        # Ranked by mass (∝ people in zone). "score" stays for UI back-compat
-        # but now carries the ranking value; density exposed separately.
-        result.append({"zone_id": zid, "name": m.get("name", zid),
-                        "score": round(mass, 2),
-                        "density": round(density, 2)})
-    return jsonify(result)
+    scores = engine.get_top_zones(_scaled_zone_polys(engine, cam_id))
+    # Ranked by mass (∝ people in zone); density exposed separately.
+    return jsonify([{"zone_id": z["zone_id"], "name": z["name"],
+                     "mass": round(z["mass"], 2),
+                     "density": round(z["density"], 2)} for z in scores])
+
+@app.route("/api/heatmap/report", methods=["POST"])
+def api_heatmap_report():
+    """Snapshot the current top zones to a timestamped JSON report on disk.
+
+    Called when the user ends a session ("Stop & Save Report"); reads the live
+    heat buffer so mass/density are the latest values before stopping.
+    """
+    cam_id = (request.get_json(silent=True) or {}).get("cam", "cam_0")
+    engine = _heat_engines.get(cam_id)
+    if engine is None:
+        return jsonify({"ok": False, "msg": f"No heatmap data ({cam_id})"}), 404
+    report = engine.generate_report(_scaled_zone_polys(engine, cam_id),
+                                    out_dir=REPORTS_DIR)
+    return jsonify({"ok": True, **report})
 
 # ── Demo Image ────────────────────────────────────────────────────────────────
 import base64
@@ -1484,44 +1512,158 @@ def _occupancy_sampler_loop():
             log.error("[OccSampler] %s", e)
 
 
+# ── Backup & durability ───────────────────────────────────────────────────────
+BACKUP_INTERVAL_SEC = 3600   # rolling backup cadence (hourly)
+BACKUP_KEEP_HOURLY  = 48     # ~2 days of hourly snapshots
+BACKUP_KEEP_DAILY   = 7      # 1 week of daily snapshots
+
+
+def _backup_dir() -> str:
+    d = os.path.join(os.path.dirname(DB_PATH), "backups")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _backup_db(dst_path: str) -> bool:
+    """Write a consistent snapshot of the live DB to dst_path.
+
+    Uses the SQLite online-backup API (safe to run while the app is writing),
+    folds the WAL in first so the snapshot is complete, and publishes via an
+    atomic rename — a power loss mid-backup can never leave a half-written file
+    (the previous good backup stays in place).
+    """
+    if not os.path.exists(DB_PATH):
+        return False
+    tmp = dst_path + ".tmp"
+    src = dst = None
+    try:
+        src = sqlite3.connect(DB_PATH, timeout=30)
+        # Make the main DB file self-contained before snapshotting.
+        src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        dst = sqlite3.connect(tmp)
+        src.backup(dst)
+        dst.close(); dst = None
+        src.close(); src = None
+        os.replace(tmp, dst_path)   # atomic publish
+        return True
+    except Exception as e:
+        log.error("[Backup] failed %s: %s", dst_path, e)
+        for c in (src, dst):
+            try:
+                if c is not None: c.close()
+            except Exception:
+                pass
+        try:
+            if os.path.exists(tmp): os.remove(tmp)
+        except Exception:
+            pass
+        return False
+
+
+def _prune_backups(prefix: str, keep: int):
+    d = _backup_dir()
+    files = sorted(f for f in os.listdir(d)
+                   if f.startswith(prefix) and f.endswith(".db"))
+    for old in files[:-keep] if keep > 0 else files:
+        try:
+            os.remove(os.path.join(d, old))
+        except Exception:
+            pass
+
+
+def _backup_loop():
+    """Rolling hourly snapshot so the most data ever lost to a corrupt/lost DB
+    file is ~1 hour. Takes one immediately on startup, then every hour."""
+    import datetime as _dt, time as _t
+    while True:
+        try:
+            stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(_backup_dir(), f"auto_{stamp}.db")
+            if _backup_db(path):
+                _prune_backups("auto_", BACKUP_KEEP_HOURLY)
+                log.info("[Backup] hourly snapshot %s", path)
+        except Exception as e:
+            log.error("[Backup] loop error: %s", e)
+        _t.sleep(BACKUP_INTERVAL_SEC)
+
+
 def _maintenance_loop():
-    """Daily: PDPA cleanup + SQLite backup. Runs at startup then every midnight."""
-    import datetime as _dt, sqlite3 as _sq3, time as _t
+    """Daily: PDPA cleanup + a dated daily backup. Runs at startup, then 00:05."""
+    import datetime as _dt, time as _t
     from src.utils.data_manager import DataManager
     dm = DataManager()
     while True:
         try:
             dm.run_daily_cleanup()
-            # Backup DB (skip if today's backup already exists)
-            backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
-            os.makedirs(backup_dir, exist_ok=True)
-            bpath = os.path.join(backup_dir, f"flowsight_{_dt.date.today().isoformat()}.db")
-            if not os.path.exists(bpath) and os.path.exists(DB_PATH):
-                src = _sq3.connect(DB_PATH)
-                dst = _sq3.connect(bpath)
-                src.backup(dst)
-                src.close(); dst.close()
-                # Keep last 7 daily backups
-                all_b = sorted(f for f in os.listdir(backup_dir) if f.endswith(".db"))
-                for old in all_b[:-7]:
-                    os.remove(os.path.join(backup_dir, old))
-                log.info("[Backup] %s", bpath)
+            dpath = os.path.join(_backup_dir(),
+                                 f"daily_{_dt.date.today().isoformat()}.db")
+            if not os.path.exists(dpath) and _backup_db(dpath):
+                _prune_backups("daily_", BACKUP_KEEP_DAILY)
+                log.info("[Backup] daily snapshot %s", dpath)
         except Exception as _e:
             log.error("[Maintenance] %s", _e)
-        # Sleep until next midnight + 5 min
         _now = _dt.datetime.now()
         _next = (_now + _dt.timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
         _t.sleep((_next - _now).total_seconds())
 
 
+_shutdown_done = threading.Event()
+
+
+def _graceful_shutdown(*_a):
+    """Flush all in-flight data and fold the WAL into the DB before exit, so a
+    clean reboot / service stop / Ctrl-C loses nothing. Idempotent."""
+    if _shutdown_done.is_set():
+        return
+    _shutdown_done.set()
+    log.info("[Shutdown] stopping cameras + flushing DB")
+    try:
+        stop_evt.set()
+        with _cams_lock:
+            stops   = list(_cam_stops.values())
+            threads = list(_cam_threads.values())
+        for e in stops:
+            e.set()
+        for t in threads:                 # each camera's finally calls logger.close()
+            t.join(timeout=8.0)            # → final buffer drain to disk
+    except Exception as e:
+        log.error("[Shutdown] camera stop error: %s", e)
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=15)
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+        log.info("[Shutdown] WAL checkpoint complete")
+    except Exception as e:
+        log.error("[Shutdown] checkpoint error: %s", e)
+
+
 if __name__ == "__main__":
+    import signal, atexit
+
     brand = load_brand()
     print(f"\n{'='*52}")
     print(f"  {brand['name']} — {brand.get('tagline', '')}")
     print(f"  http://localhost:{PORT}")
     print(f"{'='*52}\n")
 
+    # Fold any WAL left by a previous unclean exit back into the main DB file.
+    try:
+        _c = sqlite3.connect(DB_PATH, timeout=15)
+        _c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        _c.close()
+    except Exception as _e:
+        log.warning("[Startup] WAL checkpoint skipped: %s", _e)
+
+    # Flush + checkpoint on reboot / service stop / Ctrl-C.
+    atexit.register(_graceful_shutdown)
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, lambda *a: (_graceful_shutdown(), sys.exit(0)))
+        except Exception:
+            pass
+
     threading.Thread(target=_maintenance_loop, daemon=True, name="maintenance").start()
+    threading.Thread(target=_backup_loop,       daemon=True, name="backup").start()
     threading.Thread(target=_occupancy_sampler_loop, daemon=True, name="occ_sampler").start()
 
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

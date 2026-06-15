@@ -127,25 +127,57 @@ class HeatMapEngine:
         log.info("Heat map reset")
 
     def get_top_zones(self, zones_poly: dict, top_n: int = 5) -> list:
-        """
-        คำนวณว่า zone ไหนมีฝูงชนมากที่สุด
-        คืน list of (zone_id, mass, density) เรียงตาม mass จากมากไปน้อย
-
-        mass    — integrated heat over the zone ∝ จำนวนคนในโซน (ใช้จัดอันดับ
-                  "โซนไหนคนเยอะสุด"). การจัดอันดับด้วย mean อย่างเดียวทำให้
-                  โซนเล็กที่มีคน 8 คนชนะโซนใหญ่ที่มีคน 50 คนได้
-        density — mean heat per pixel (ความหนาแน่นเชิงพื้นที่) ไว้แสดงประกอบ
-        """
         scores = []
-        for zone_id, poly in zones_poly.items():
+        for zone_id, zone_data in zones_poly.items(): # สมมติว่า zone_data เก็บ {poly: [...], name: "..."}
+            poly = zone_data.get("poly")
+            name = zone_data.get("name", zone_id) # ถ้าไม่มีชื่อ ให้ใช้ ID แทน
+            
             if poly is None or len(poly) < 3:
                 continue
+                
             mask = np.zeros(self._heat.shape, dtype=np.uint8)
             cv2.fillPoly(mask, [poly.astype(np.int32)], 255)
             zone_heat = self._heat[mask > 0]
+            
             if zone_heat.size > 0:
-                scores.append((zone_id,
-                               float(zone_heat.sum()),
-                               float(zone_heat.mean())))
-        scores.sort(key=lambda x: x[1], reverse=True)
+                scores.append({
+                    "zone_id": zone_id,
+                    "name": name,
+                    "mass": float(zone_heat.sum()),
+                    "density": float(zone_heat.mean())
+                })
+        
+        # เรียงลำดับตาม mass (เปลี่ยนจากเดิมที่เรียง index 1)
+        scores.sort(key=lambda x: x["mass"], reverse=True)
         return scores[:top_n]
+
+    def generate_report(self, zones_poly: dict, out_dir: str = "reports",
+                        top_n: int = 5) -> dict:
+        """Snapshot the CURRENT top zones into a timestamped JSON report.
+
+        Reads the live heat buffer at call time, so mass/density reflect the
+        latest accumulated state right before the caller stops the engine.
+        Writes <out_dir>/heatmap_report_YYYYMMDD_HHMMSS.json and returns the
+        report dict (with the saved file path attached as "file").
+        """
+        top = self.get_top_zones(zones_poly, top_n=top_n)
+        ts  = time.strftime("%Y%m%d_%H%M%S")
+        report = {
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "zone_count": len(top),
+            "zones": [
+                {"zone_id": z["zone_id"], "name": z["name"],
+                 "mass": round(z["mass"], 2), "density": round(z["density"], 2)}
+                for z in top
+            ],
+        }
+
+        out  = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / f"heatmap_report_{ts}.json"
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
+
+        report["file"] = str(path)
+        log.info("Heat map report saved: %s (%d zones)", path, len(top))
+        return report

@@ -39,7 +39,10 @@ def get_daily_data(db_path: str, date_filter: str = None) -> dict:
     purch   = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN {PURCHASING_IN} {wh}", p)[0][0]
     loiter  = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN ('loitering','loiter') {wh}", p)[0][0]
     waiting = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE behavior_id IN ('waiting','waiting_too_long') {wh}", p)[0][0]
-    alerts  = q(f"SELECT COUNT(*) FROM events WHERE needs_staff=1 {wh}", p)[0][0]
+    # Distinct people who needed staff — not raw event rows. The v2 logger
+    # heartbeats every 5 s while a person dwells in an alerting behaviour, so
+    # COUNT(*) inflates one sustained alert into dozens of rows.
+    alerts  = q(f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE needs_staff=1 {wh}", p)[0][0]
     dr      = q(f"""SELECT
         MIN(strftime('%H:%M',datetime(timestamp,'unixepoch','+{TZ} hours'))),
         MAX(strftime('%H:%M',datetime(timestamp,'unixepoch','+{TZ} hours')))

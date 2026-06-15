@@ -83,3 +83,40 @@ FlowSight พร้อมให้บริการในรูปแบบ Lic
 
 *FlowSight — See More. Know More. Grow More.*
 
+---
+
+## ส่วนที่ 3 — Quick Start (สำหรับ Developer)
+
+> สรุปแบบย่อ — รายละเอียดเต็ม (build, troubleshoot, checklist รับมอบงาน) ดู [DEVELOPER_HANDOVER.md](DEVELOPER_HANDOVER.md)
+> สถาปัตยกรรมเชิงลึก ดู [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)
+
+**Stack:** backend = Python 3.12 + Flask + YOLOv8 (Ultralytics) · frontend = React 19 + Vite + Tailwind
+
+**ต้องมีก่อน:** Python 3.12, Node 20+, (ทางเลือก) Docker Desktop
+
+### รันแบบ Native (macOS / Linux)
+```bash
+scripts/setup-venv.sh                 # ครั้งแรก: สร้าง venv (APFS) + ลง deps
+scripts/run-native.sh                 # backend → http://localhost:5001
+
+# อีก terminal — frontend dev + HMR
+cd frontend && npm install && npm run dev   # → http://localhost:8080  (proxy /api → :5001)
+```
+> Mac ใช้พอร์ต **5001** เพราะ AirPlay จองพอร์ต 5000 · venv ต้องอยู่บนดิสก์ APFS (ไม่ใช่ exFAT/NTFS)
+
+### รันแบบ Docker
+```bash
+cp .env.example .env                  # ปรับ TZ_OFFSET / API keys ถ้าต้องการ
+docker compose up --build             # → http://localhost:5001
+
+# GPU (NVIDIA):
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+```
+
+### Build frontend ฝังเข้า backend
+```bash
+cd frontend && npm run build          # dist/assets → backend/static/assets, dist/index.html → backend/templates/index_vue.html
+```
+
+**แก้ตรงไหน:** หน้าเว็บ → `frontend/src/pages/*.tsx` · logic/API → `backend/src/api/server.py` · AI → `backend/src/engine/`
+

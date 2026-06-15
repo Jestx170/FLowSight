@@ -26,7 +26,8 @@ export interface ActivityEvent { time: string; date: string; person_id: string; 
 export interface Activity { ok: boolean; events: ActivityEvent[]; total: number; page: number; pages: number }
 export interface Insight { ok: boolean; html: string; source: string }
 export interface BehaviorRow { id: string; name: string; zone: string; action: "moving" | "dwell" | "still" | "presence"; threshold: number; alert: boolean; color: string }
-export interface HeatZone { name: string; score: number; zone_id: string }
+export interface HeatZone { name: string; density : number; zone_id: string; mass: number;  }
+export interface HeatReport { ok: boolean; generated_at: string; zone_count: number; zones: HeatZone[]; file: string }
 export interface ZonePoly { name: string; category: string; color: string; points: number[][] }
 export interface ZonesConfig { _meta?: { w: number; h: number }; [camId: string]: any }
 export interface Brand { name: string; tagline: string }
@@ -56,6 +57,7 @@ export const api = {
   behaviorsReset: () => j("/api/behaviors/reset", { method: "POST" }),
   heatmapZones: (cam: string) => j<HeatZone[]>(`/api/heatmap/zones?cam=${encodeURIComponent(cam)}`),
   heatmapReset: () => j("/api/heatmap/reset", { method: "POST" }),
+  heatmapReport: (cam: string) => j<HeatReport>("/api/heatmap/report", { method: "POST", body: JSON.stringify({ cam }) }),
   zonesLoad: () => j<ZonesConfig>("/api/zones/load"),
   zonesSave: (cfg: ZonesConfig) => j("/api/zones/save", { method: "POST", body: JSON.stringify(cfg) }),
   zonesDelete: (zone_id: string, cam: string) =>

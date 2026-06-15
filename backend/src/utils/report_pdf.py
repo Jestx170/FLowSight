@@ -54,7 +54,10 @@ def build_pdf(db_path: str, date_filter: str = None, out_path: str = None):
     except Exception:
         purch = 0
 
-    alrt = query(conn, f"SELECT COUNT(*) FROM events WHERE needs_staff=1 {wh}", p)[0][0]
+    # Distinct people who needed staff — not raw event rows. The v2 logger
+    # heartbeats every 5 s while a person dwells in an alerting behaviour, so
+    # COUNT(*) inflates one sustained alert into dozens of rows.
+    alrt = query(conn, f"SELECT COUNT(DISTINCT {VISITOR_KEY}) FROM events WHERE needs_staff=1 {wh}", p)[0][0]
 
     top_z = query(conn, f"""SELECT zone_name, COUNT(*) n FROM events
         WHERE zone!='floor' AND zone_name!='' {wh}
