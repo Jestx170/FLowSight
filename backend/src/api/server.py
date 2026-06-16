@@ -263,14 +263,16 @@ def _mjpeg_generator(cam_id):
     boundary = b"--frame"
     while True:
         try:
-            # Get frame for this camera
+            # Get frame for THIS camera only. Never fall back to _last_frame[0]
+            # (the global last frame written by every camera) — doing so makes a
+            # not-yet-ready camera display another camera's video.
             with _cams_lock:
                 frame = _cam_frames.get(cam_id)
             if frame is None:
-                frame = _last_frame[0]
-            if frame is None:
-                # Send blank frame
+                # No frame of its own yet — show a "no signal" placeholder.
                 frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(frame, f"{cam_id}: connecting...", (20, 240),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
 
             ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ok:
@@ -314,8 +316,7 @@ def api_frame_cam(cam_id):
     with _cams_lock:
         frame = _cam_frames.get(cam_id)
     if frame is None:
-        frame = _last_frame[0]
-    if frame is None:
+        # Per-camera request: don't borrow another camera's frame.
         return jsonify({"ok": False, "msg": "no frame yet"})
     h, w = frame.shape[:2]
     if w > 1280:
@@ -1030,6 +1031,44 @@ def api_heatmap_report():
                                     out_dir=REPORTS_DIR)
     return jsonify({"ok": True, **report})
 
+def _safe_report_path(name: str) -> Path | None:
+    """Resolve a report filename to a path inside REPORTS_DIR, or None if the
+    name is malformed / would escape the directory (path-traversal guard)."""
+    if (Path(name).name != name
+            or not name.startswith("heatmap_report_")
+            or not name.endswith(".json")):
+        return None
+    p = Path(REPORTS_DIR) / name
+    return p if p.is_file() else None
+
+@app.route("/api/heatmap/reports")
+def api_heatmap_reports():
+    """List saved heat-map reports, newest first (summary only)."""
+    out = []
+    d = Path(REPORTS_DIR)
+    if d.is_dir():
+        for p in sorted(d.glob("heatmap_report_*.json"), reverse=True):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            zones = data.get("zones", [])
+            out.append({
+                "file": p.name,
+                "generated_at": data.get("generated_at", ""),
+                "zone_count": data.get("zone_count", len(zones)),
+                "top_zone": zones[0]["name"] if zones else None,
+            })
+    return jsonify(out)
+
+@app.route("/api/heatmap/reports/<name>")
+def api_heatmap_report_detail(name):
+    """Full content of a single saved report."""
+    p = _safe_report_path(name)
+    if p is None:
+        return jsonify({"ok": False, "msg": "Report not found"}), 404
+    return jsonify(json.loads(p.read_text(encoding="utf-8")))
+
 # ── Demo Image ────────────────────────────────────────────────────────────────
 import base64
 
@@ -1140,13 +1179,30 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
         set_status(False, f"Import error: {e}")
         return
 
+    # ── Source resolution ─────────────────────────────────────────────────
+    # `rtsp_url` normally holds an RTSP/HTTP camera URL, but for TESTING it may
+    # instead point at a LOCAL VIDEO FILE (optionally prefixed `file://`). A
+    # path that exists on disk is played on a loop and paced to its native frame
+    # rate, so dwell-time behaviours (interest, loitering, waiting…) fire just as
+    # they would with a live camera — no physical camera required.
+    src = rtsp
+    # Forgive a path pasted with wrapping quotes (e.g. a shell-escaped
+    # "'/Volumes/My Clip.mp4'") — strip one matching quote pair, then file://.
+    if len(src) >= 2 and src[0] in "'\"" and src[-1] == src[0]:
+        src = src[1:-1].strip()
+    if src.lower().startswith("file://"):
+        src = src[7:]
+    is_file = bool(src) and not src.lower().startswith(
+        ("rtsp://", "http://", "https://", "rtmp://")) and os.path.isfile(src)
+
     if not rtsp:
-        log.error("[Cam:%s] No RTSP URL", cam_id)
-        set_status(False, "No RTSP URL")
+        log.error("[Cam:%s] No source (RTSP URL or video file)", cam_id)
+        set_status(False, "No source")
         return
 
-    log.info("[Cam:%s] Connecting to: %s", cam_id, rtsp[:40] + "...")
-    set_status(False, "Connecting...")
+    log.info("[Cam:%s] Connecting to %s: %s", cam_id,
+             "video file" if is_file else "stream", src[:60])
+    set_status(False, "Opening video file..." if is_file else "Connecting...")
 
     RECONNECT_INTERVAL = 5
 
@@ -1157,12 +1213,13 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
         again, instead of staying down until a human presses start."""
         attempt = 0
         while not stop_event.is_set():
-            c = cv2.VideoCapture(rtsp, cv2.CAP_FFMPEG)
-            c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            # Limit how long cap.read() blocks so the grab thread can exit
-            # promptly when stop_event fires (matches grab_thread.join buffer).
-            c.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)   # 10 s to open
-            c.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC,  3_000)   # 3 s per read
+            c = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
+            if not is_file:
+                c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                # Limit how long cap.read() blocks so the grab thread can exit
+                # promptly when stop_event fires (matches grab_thread.join buffer).
+                c.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)   # 10 s to open
+                c.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC,  3_000)   # 3 s per read
             if c.isOpened():
                 return c
             c.release()
@@ -1260,18 +1317,39 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
     _frame_lock   = threading.Lock()
     _grab_stop    = threading.Event()
 
+    # Video-file playback: pace the grabber to the clip's native fps so video
+    # time tracks wall-clock time (dwell-based behaviours need realistic
+    # timing), and loop back to frame 0 on EOF so it behaves like a continuous
+    # camera instead of triggering the stream-lost reconnect path.
+    _file_fps = (cap.get(cv2.CAP_PROP_FPS) or 0.0) if is_file else 0.0
+    _frame_interval = (1.0 / _file_fps) if _file_fps > 0 else 0.04
+    if is_file:
+        log.info("[Cam:%s] Video file looping at %.1f fps", cam_id,
+                 _file_fps if _file_fps > 0 else 25.0)
+
     def _grab_loop():
         nonlocal cap, fail_count
         while not _grab_stop.is_set() and not stop_event.is_set():
+            t0 = _time.monotonic()
             ret, frame = cap.read()
             if ret:
                 with _frame_lock:
                     _latest_frame[0] = frame
                     _frame_seq[0]   += 1
                 fail_count = 0
+            elif is_file:
+                # End of clip — rewind and keep playing.
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
             else:
                 fail_count += 1
                 _time.sleep(0.01)
+                continue
+            if is_file:
+                # Sleep the remainder of this frame's display time (interruptible).
+                dt = _frame_interval - (_time.monotonic() - t0)
+                if dt > 0:
+                    _grab_stop.wait(dt)
 
     def _start_grabber():
         t = threading.Thread(target=_grab_loop, daemon=True,

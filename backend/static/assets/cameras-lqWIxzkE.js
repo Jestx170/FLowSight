@@ -1,1 +1,0 @@
-import{d as l,r as s}from"./index-BAWtAxtB.js";import{a as n}from"./_plugin-vue_export-helper-POTfOpbR.js";const i=l("cameras",()=>{const a=s([]),e=s(null);async function r(){const t=await n.get("/api/cameras");a.value=t.cameras||[],!e.value&&a.value.length&&(e.value=a.value[0].id)}function o(t){e.value=t}return{list:a,selectedId:e,load:r,select:o}});export{i as u};

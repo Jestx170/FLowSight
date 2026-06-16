@@ -208,6 +208,25 @@ Dockerfile เป็น multi-stage: (1) `node:20` build React → (2) `python:3
    logic การ match อยู่ใน `backend/src/engine/behavior_engine.py`
 5. **อัปเกรดโมเดล** → วางไฟล์ `.pt` ใหม่แทน `backend/data/yolov8n.pt` (เช่น yolov8s/m เมื่อมี GPU headroom)
 
+### เทสด้วยไฟล์วิดีโอ (แทนกล้องจริง)
+
+ไม่ต้องมีกล้อง RTSP จริงก็เทสได้ — ช่อง **RTSP URL** ของกล้อง (หน้า Settings หรือ `brand_config.json`) รับ **path ไฟล์วิดีโอในเครื่อง** ได้ด้วย:
+
+```jsonc
+// backend/config/brand_config.json
+{ "id": "cam_0", "name": "Test", "rtsp_url": "/path/to/test.mp4", "enabled": true }
+// หรือใส่ผ่านหน้า Settings ของเว็บก็ได้ — ใช้ path เต็มจะชัวร์สุด (relative อิงจาก backend/)
+// รองรับ prefix file:// ด้วย:  "file:///path/to/test.mp4"
+```
+
+พฤติกรรมเมื่อใส่ไฟล์วิดีโอ:
+- ระบบตรวจว่าเป็นไฟล์ (มีอยู่จริง + ไม่ขึ้นต้นด้วย `rtsp://`/`http(s)://`/`rtmp://`) → เข้าโหมดไฟล์อัตโนมัติ
+- **เล่นวน (loop)** ไม่รู้จบ เหมือนกล้องสด (จบไฟล์แล้วกรอกลับเฟรม 0)
+- **เล่นตาม fps จริงของวิดีโอ** เพื่อให้พฤติกรรมที่อิงเวลา (สนใจ ≥ 20 วิ, loitering, รอนาน) trigger ได้สมจริงตามเวลานาฬิกา (ไม่ fast-forward)
+- log จะขึ้น `Video file looping at NN.N fps`
+
+> โค้ดอยู่ใน `camera_engine_loop` ([server.py](backend/src/api/server.py)) — ตัวแปร `is_file` + `_grab_loop` ส่วนที่ pace/loop
+
 **ก่อน commit:**
 ```bash
 cd frontend && npm run lint && npm run format    # ESLint + Prettier

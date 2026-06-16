@@ -1,1 +1,0 @@
-import{u as t,c,a,t as s,b as o,o as n}from"./index-CsZ4fVe1.js";const r={class:"placeholder-view"},u={__name:"BehaviorsView",setup(l){const{t:e}=t();return(i,p)=>(n(),c("section",r,[a("h1",null,s(o(e)("nav.behaviors")),1),a("p",null,s(o(e)("scaffold.placeholder")),1)]))}};export{u as default};

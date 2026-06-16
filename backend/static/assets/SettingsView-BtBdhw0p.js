@@ -1,1 +1,0 @@
-import{u as n,c as o,a as s,t,b as a,o as c}from"./index-Z6C93Drw.js";const l={class:"placeholder-view"},u={__name:"SettingsView",setup(r){const{t:e}=n();return(i,p)=>(c(),o("section",l,[s("h1",null,t(a(e)("nav.settings")),1),s("p",null,t(a(e)("scaffold.placeholder")),1)]))}};export{u as default};

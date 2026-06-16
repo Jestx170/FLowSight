@@ -5,8 +5,9 @@ import { DashboardPage } from "./pages/Dashboard";
 import { ZonesPage } from "./pages/Zones";
 import { BehaviorsPage } from "./pages/Behaviors";
 import { HeatmapPage } from "./pages/Heatmap";
+import { ReportsPage } from "./pages/Reports";
 import { SettingsPage } from "./pages/Settings";
-import { Activity, BarChart3, LayoutGrid, ListChecks, Flame, Settings as Cog } from "lucide-react";
+import { Activity, BarChart3, LayoutGrid, ListChecks, Flame, FileText, Settings as Cog } from "lucide-react";
 import logo from "./public/logo.png";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
     { to: "/zones", label: t.nav.zones, icon: <LayoutGrid size={16} /> },
     { to: "/behaviors", label: t.nav.behaviors, icon: <ListChecks size={16} /> },
     { to: "/heatmap", label: t.nav.heatmap, icon: <Flame size={16} /> },
+    { to: "/reports", label: t.nav.reports, icon: <FileText size={16} /> },
     { to: "/settings", label: t.nav.settings, icon: <Cog size={16} /> },
   ];
 
@@ -83,6 +85,7 @@ export default function App() {
           {route === "/zones" && <ZonesPage />}
           {route === "/behaviors" && <BehaviorsPage />}
           {route === "/heatmap" && <HeatmapPage />}
+          {route === "/reports" && <ReportsPage />}
           {route === "/settings" && <SettingsPage />}
         </div>
       </main>

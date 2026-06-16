@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 
-export type RoutePath = "/live" | "/dashboard" | "/zones" | "/behaviors" | "/heatmap" | "/settings";
+export type RoutePath = "/live" | "/dashboard" | "/zones" | "/behaviors" | "/heatmap" | "/reports" | "/settings";
 
 function parse(): RoutePath {
   const h = window.location.hash.replace(/^#/, "") || "/live";
-  const valid: RoutePath[] = ["/live", "/dashboard", "/zones", "/behaviors", "/heatmap", "/settings"];
+  const valid: RoutePath[] = ["/live", "/dashboard", "/zones", "/behaviors", "/heatmap", "/reports", "/settings"];
   return (valid.includes(h as RoutePath) ? h : "/live") as RoutePath;
 }
 

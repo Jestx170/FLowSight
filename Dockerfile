@@ -59,8 +59,8 @@ RUN pip install --no-cache-dir -r requirements-docker.txt \
 COPY backend/src/        ./src/
 COPY backend/config/     ./config/
 COPY backend/templates/  ./templates/
-# Baked static (icons etc.) first, then overlay the freshly built Vue assets and
-# the Vue index.html — so the image always serves the current SPA, not whatever
+# Baked static (icons etc.) first, then overlay the freshly built React assets and
+# the React index.html — so the image always serves the current SPA, not whatever
 # stale build happens to sit in backend/templates on the host.
 COPY backend/static/     ./static/
 COPY --from=frontend /frontend/dist/assets/     ./static/assets/

@@ -6,7 +6,7 @@ const KEY = "flowsight.lang";
 const dict = {
   en: {
     appName: "FlowSight",
-    nav: { live: "Live", dashboard: "Dashboard", zones: "Zones", behaviors: "Behaviors", heatmap: "Heat Map", settings: "Settings" },
+    nav: { live: "Live", dashboard: "Dashboard", zones: "Zones", behaviors: "Behaviors", heatmap: "Heat Map", reports: "Reports", settings: "Settings" },
     common: {
       running: "Running", stopped: "Stopped", start: "Start engine", stop: "Stop engine",
       save: "Save", reset: "Reset", delete: "Delete", add: "Add", cancel: "Cancel",
@@ -46,6 +46,7 @@ const dict = {
       applyConfirm: "Replace all behaviors with the preset",
     },
     heat: { title: "Heat Map", zoneScores: "Zone Scores", reset: "Reset heatmap" },
+    reports: { title: "Reports", subtitle: "Saved heat-map session summaries.", refresh: "Refresh", saved: "Saved reports", none: "No reports yet", zones: "zones", top: "Top", select: "Select a report to view its details.", detail: "Zone ranking", empty: "No zone data in this report.", topZone: "Busiest zone" },
     settings: {
       title: "Settings", branding: "Branding", brandName: "Brand name", tagline: "Tagline",
       detection: "Detection", confidence: "Confidence", anonymize: "Anonymize people",
@@ -58,7 +59,7 @@ const dict = {
   },
   th: {
     appName: "FlowSight",
-    nav: { live: "ไลฟ์", dashboard: "แดชบอร์ด", zones: "โซน", behaviors: "พฤติกรรม", heatmap: "ฮีตแมป", settings: "ตั้งค่า" },
+    nav: { live: "ไลฟ์", dashboard: "แดชบอร์ด", zones: "โซน", behaviors: "พฤติกรรม", heatmap: "ฮีตแมป", reports: "รายงาน", settings: "ตั้งค่า" },
     common: {
       running: "กำลังทำงาน", stopped: "หยุด", start: "เริ่มทำงาน", stop: "หยุดทำงาน",
       save: "บันทึก", reset: "รีเซ็ต", delete: "ลบ", add: "เพิ่ม", cancel: "ยกเลิก",
@@ -98,6 +99,7 @@ const dict = {
       applyConfirm: "แทนที่พฤติกรรมทั้งหมดด้วยชุด",
     },
     heat: { title: "ฮีตแมป", zoneScores: "คะแนนตามโซน", reset: "รีเซ็ตฮีตแมป" },
+    reports: { title: "รายงาน", subtitle: "สรุปผลฮีตแมปที่บันทึกไว้แต่ละรอบ", refresh: "รีเฟรช", saved: "รายงานที่บันทึกไว้", none: "ยังไม่มีรายงาน", zones: "โซน", top: "สูงสุด", select: "เลือกรายงานเพื่อดูรายละเอียด", detail: "อันดับโซน", empty: "รายงานนี้ไม่มีข้อมูลโซน", topZone: "โซนที่คนใช้งานมากสุด" },
     settings: {
       title: "ตั้งค่า", branding: "แบรนด์", brandName: "ชื่อแบรนด์", tagline: "สโลแกน",
       detection: "การตรวจจับ", confidence: "ความเชื่อมั่น", anonymize: "ปกปิดใบหน้า",

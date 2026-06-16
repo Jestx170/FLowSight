@@ -195,14 +195,43 @@ function KpiChip({ icon, label, value, mono, accent }: { icon: React.ReactNode; 
   );
 }
 
-// Keep <img src> stable: set ONCE when camId changes. Re-rendering with new src would
-// kill the MJPEG socket and reconnect every poll, leaving the feed black.
+// MJPEG feed. The connection is kept stable during normal playback (src is set
+// once per camId/running change — re-setting on every poll would kill the
+// socket and flash black). But Chrome SUSPENDS long-lived MJPEG sockets when
+// the tab is backgrounded or the machine sleeps, surfacing as
+// ERR_NETWORK_IO_SUSPENDED and a frozen feed that never recovers. So we also
+// reconnect on <img> error and when the tab becomes visible again.
 function CameraStream({ camId, running }: { camId: string; running: boolean }) {
   const imgRef = useRef<HTMLImageElement>(null);
   useEffect(() => {
-    if (imgRef.current && running) {
-      imgRef.current.src = `/api/stream/${camId}`;
-    }
+    const img = imgRef.current;
+    if (!img || !running) return;
+
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    // Cache-bust so the browser opens a FRESH socket instead of reusing the
+    // suspended one. Only changes when we deliberately (re)connect.
+    const connect = () => {
+      img.src = `/api/stream/${camId}?t=${Date.now()}`;
+    };
+
+    const onError = () => {
+      clearTimeout(retry);
+      retry = setTimeout(connect, 1000);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") connect();
+    };
+
+    img.addEventListener("error", onError);
+    document.addEventListener("visibilitychange", onVisible);
+    connect();
+
+    return () => {
+      clearTimeout(retry);
+      img.removeEventListener("error", onError);
+      document.removeEventListener("visibilitychange", onVisible);
+      img.src = ""; // close the MJPEG socket on unmount
+    };
   }, [camId, running]);
   if (!running) {
     return <div className="text-muted-foreground text-sm">{ "Engine stopped. Start the engine to begin." }</div>;
