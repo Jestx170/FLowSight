@@ -152,13 +152,18 @@ class HeatMapEngine:
         return scores[:top_n]
 
     def generate_report(self, zones_poly: dict, out_dir: str = "reports",
-                        top_n: int = 5) -> dict:
+                        top_n: int = 5, frame: np.ndarray | None = None) -> dict:
         """Snapshot the CURRENT top zones into a timestamped JSON report.
 
         Reads the live heat buffer at call time, so mass/density reflect the
         latest accumulated state right before the caller stops the engine.
         Writes <out_dir>/heatmap_report_YYYYMMDD_HHMMSS.json and returns the
         report dict (with the saved file path attached as "file").
+
+        If `frame` (the camera's latest raw frame) is given, also saves a
+        colorized heat-map snapshot next to the JSON as a .jpg, so the report
+        carries a visual you can hand straight to marketing — not just numbers.
+        The filename is recorded in the report under "image".
         """
         top = self.get_top_zones(zones_poly, top_n=top_n)
         ts  = time.strftime("%Y%m%d_%H%M%S")
@@ -174,6 +179,12 @@ class HeatMapEngine:
 
         out  = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
+
+        if frame is not None:
+            img_name = f"heatmap_report_{ts}.jpg"
+            self.save_snapshot(frame, str(out / img_name))
+            report["image"] = img_name
+
         path = out / f"heatmap_report_{ts}.json"
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2),
                         encoding="utf-8")

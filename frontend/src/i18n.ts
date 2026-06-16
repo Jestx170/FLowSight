@@ -46,7 +46,7 @@ const dict = {
       applyConfirm: "Replace all behaviors with the preset",
     },
     heat: { title: "Heat Map", zoneScores: "Zone Scores", reset: "Reset heatmap" },
-    reports: { title: "Reports", subtitle: "Saved heat-map session summaries.", refresh: "Refresh", saved: "Saved reports", none: "No reports yet", zones: "zones", top: "Top", select: "Select a report to view its details.", detail: "Zone ranking", empty: "No zone data in this report.", topZone: "Busiest zone" },
+    reports: { title: "Reports", subtitle: "Saved heat-map session summaries.", refresh: "Refresh", saved: "Saved reports", none: "No reports yet", zones: "zones", top: "Top", select: "Select a report to view its details.", detail: "Zone ranking", empty: "No zone data in this report.", topZone: "Busiest zone", snapshot: "Heat-map snapshot", noImage: "No snapshot saved for this report (saved before this feature was added).", deleteConfirm: "Delete this report? This cannot be undone." },
     settings: {
       title: "Settings", branding: "Branding", brandName: "Brand name", tagline: "Tagline",
       detection: "Detection", confidence: "Confidence", anonymize: "Anonymize people",
@@ -55,6 +55,10 @@ const dict = {
       aiKeys: "AI API keys", gemini: "Gemini API key", claude: "Claude API key",
       cameras: "Cameras", camId: "ID", camName: "Name", camRtsp: "RTSP URL", camEnabled: "Enabled",
       saveAll: "Save settings", saved: "Settings saved",
+      dangerZone: "Data management", clearData: "Clear all data",
+      clearDataDesc: "Deletes every dashboard event, activity log, and occupancy record, and resets the in-memory alert feed and live heat maps. Use this between test runs so old footage doesn't mix into new stats. Saved heat-map Reports are NOT affected.",
+      clearConfirm: "Delete ALL dashboard/activity/heat-map data? This cannot be undone.",
+      clearDone: "Cleared",
     },
   },
   th: {
@@ -99,7 +103,7 @@ const dict = {
       applyConfirm: "แทนที่พฤติกรรมทั้งหมดด้วยชุด",
     },
     heat: { title: "ฮีตแมป", zoneScores: "คะแนนตามโซน", reset: "รีเซ็ตฮีตแมป" },
-    reports: { title: "รายงาน", subtitle: "สรุปผลฮีตแมปที่บันทึกไว้แต่ละรอบ", refresh: "รีเฟรช", saved: "รายงานที่บันทึกไว้", none: "ยังไม่มีรายงาน", zones: "โซน", top: "สูงสุด", select: "เลือกรายงานเพื่อดูรายละเอียด", detail: "อันดับโซน", empty: "รายงานนี้ไม่มีข้อมูลโซน", topZone: "โซนที่คนใช้งานมากสุด" },
+    reports: { title: "รายงาน", subtitle: "สรุปผลฮีตแมปที่บันทึกไว้แต่ละรอบ", refresh: "รีเฟรช", saved: "รายงานที่บันทึกไว้", none: "ยังไม่มีรายงาน", zones: "โซน", top: "สูงสุด", select: "เลือกรายงานเพื่อดูรายละเอียด", detail: "อันดับโซน", empty: "รายงานนี้ไม่มีข้อมูลโซน", topZone: "โซนที่คนใช้งานมากสุด", snapshot: "ภาพฮีตแมป", noImage: "รายงานนี้ไม่มีภาพบันทึกไว้ (บันทึกก่อนจะมีฟีเจอร์นี้)", deleteConfirm: "ลบรายงานนี้? ไม่สามารถย้อนกลับได้" },
     settings: {
       title: "ตั้งค่า", branding: "แบรนด์", brandName: "ชื่อแบรนด์", tagline: "สโลแกน",
       detection: "การตรวจจับ", confidence: "ความเชื่อมั่น", anonymize: "ปกปิดใบหน้า",
@@ -108,6 +112,10 @@ const dict = {
       aiKeys: "คีย์ AI", gemini: "Gemini API key", claude: "Claude API key",
       cameras: "กล้อง", camId: "ID", camName: "ชื่อ", camRtsp: "RTSP URL", camEnabled: "เปิดใช้",
       saveAll: "บันทึกการตั้งค่า", saved: "บันทึกสำเร็จ",
+      dangerZone: "จัดการข้อมูล", clearData: "ล้างข้อมูลทั้งหมด",
+      clearDataDesc: "ลบข้อมูลแดชบอร์ด, บันทึกกิจกรรม, และคนในพื้นที่ทั้งหมด พร้อมรีเซ็ตแจ้งเตือนและฮีตแมปที่กำลังทำงาน ใช้ระหว่างรอบเทสต่างๆ เพื่อไม่ให้ข้อมูลเก่าปนกับข้อมูลใหม่ — รายงานฮีตแมปที่บันทึกไว้ (หน้า Reports) จะไม่ถูกลบ",
+      clearConfirm: "ลบข้อมูลแดชบอร์ด/กิจกรรม/ฮีตแมปทั้งหมด? ไม่สามารถย้อนกลับได้",
+      clearDone: "ล้างข้อมูลแล้ว",
     },
   },
 };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Brand, type Camera, type Settings } from "../api";
 import { useLang } from "../i18n";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Plus, Save, Trash2, AlertTriangle } from "lucide-react";
 
 export function SettingsPage() {
   const { t } = useLang();
@@ -9,6 +9,8 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [saved, setSaved] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [cleared, setCleared] = useState<{ events: number; occupancy: number } | null>(null);
 
   useEffect(() => {
     api.brand().then(setBrand).catch(() => {});
@@ -45,6 +47,21 @@ export function SettingsPage() {
   const removeCam = (i: number) => setCameras((cs) => cs.filter((_, k) => k !== i));
 
   const updateSettings = (patch: Partial<Settings>) => setSettings((s) => (s ? { ...s, ...patch } : s));
+
+  const clearData = async () => {
+    if (clearing || !confirm(t.settings.clearConfirm)) return;
+    setClearing(true);
+    setCleared(null);
+    try {
+      const r = await api.dataClear();
+      setCleared({ events: r.events, occupancy: r.occupancy });
+    } catch (e) {
+      console.error(e);
+      alert("❌ " + String(e));
+    } finally {
+      setClearing(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -148,6 +165,24 @@ export function SettingsPage() {
               {cameras.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">{t.common.noData}</td></tr>}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="fs-card space-y-3" style={{ borderColor: "var(--destructive)" }}>
+        <h2 className="font-semibold flex items-center gap-2" style={{ color: "var(--destructive)" }}>
+          <AlertTriangle size={16} />{t.settings.dangerZone}
+        </h2>
+        <p className="text-sm text-muted-foreground">{t.settings.clearDataDesc}</p>
+        <div className="flex items-center gap-3">
+          <button className="fs-btn-outline" style={{ color: "var(--destructive)", borderColor: "var(--destructive)" }}
+            onClick={clearData} disabled={clearing}>
+            <Trash2 size={14} />{clearing ? "…" : t.settings.clearData}
+          </button>
+          {cleared && (
+            <span className="text-sm" style={{ color: "var(--success)" }}>
+              {t.settings.clearDone}: {cleared.events} events, {cleared.occupancy} occupancy
+            </span>
+          )}
         </div>
       </div>
     </div>

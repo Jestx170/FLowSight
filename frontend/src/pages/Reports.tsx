@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type HeatReport, type HeatReportSummary } from "../api";
 import { useLang } from "../i18n";
-import { RotateCcw, FileText } from "lucide-react";
+import { RotateCcw, FileText, Trash2 } from "lucide-react";
 
 export function ReportsPage() {
   const { t } = useLang();
@@ -9,6 +9,7 @@ export function ReportsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<HeatReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -27,6 +28,24 @@ export function ReportsPage() {
     if (!selected) { setDetail(null); return; }
     api.heatmapReportDetail(selected).then(setDetail).catch(() => setDetail(null));
   }, [selected]);
+
+  const deleteReport = async (file: string) => {
+    if (deleting || !confirm(t.reports.deleteConfirm)) return;
+    setDeleting(file);
+    try {
+      await api.heatmapReportDelete(file);
+      setList((cur) => {
+        const next = cur.filter((r) => r.file !== file);
+        setSelected((cur2) => (cur2 === file ? (next[0]?.file ?? null) : cur2));
+        return next;
+      });
+    } catch (e) {
+      console.error(e);
+      alert("❌ " + String(e));
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   // mass is the ranking value; scale bars relative to the busiest zone.
   const maxMass = Math.max(1, ...(detail?.zones ?? []).map((z) => z.mass));
@@ -52,10 +71,10 @@ export function ReportsPage() {
           ) : (
             <ul className="space-y-1">
               {list.map((r) => (
-                <li key={r.file}>
+                <li key={r.file} className="group relative">
                   <button
                     onClick={() => setSelected(r.file)}
-                    className={"w-full text-left px-3 py-2 rounded-md transition-colors " +
+                    className={"w-full text-left px-3 py-2 pr-9 rounded-md transition-colors " +
                       (selected === r.file ? "bg-accent text-primary" : "hover:bg-accent/60")}
                   >
                     <div className="flex items-center gap-2 text-sm font-medium">
@@ -65,6 +84,14 @@ export function ReportsPage() {
                       {r.zone_count} {t.reports.zones}
                       {r.top_zone ? ` · ${t.reports.top}: ${r.top_zone}` : ""}
                     </div>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteReport(r.file); }}
+                    disabled={deleting === r.file}
+                    title={t.common.delete}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                  >
+                    <Trash2 size={14} />
                   </button>
                 </li>
               ))}
@@ -82,6 +109,21 @@ export function ReportsPage() {
                 <h2 className="font-semibold">{t.reports.detail}</h2>
                 <span className="text-sm text-muted-foreground">{detail.generated_at}</span>
               </div>
+
+              <div className="mb-4">
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">{t.reports.snapshot}</h3>
+                {detail.image ? (
+                  <a href={api.heatmapReportImageUrl(detail.image)} target="_blank" rel="noreferrer">
+                    <img src={api.heatmapReportImageUrl(detail.image)} alt={t.reports.snapshot}
+                      className="w-full rounded-md border border-border object-contain bg-black" />
+                  </a>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-4 text-center border border-dashed border-border rounded-md">
+                    {t.reports.noImage}
+                  </p>
+                )}
+              </div>
+
               {detail.zones.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-6 text-center">{t.reports.empty}</p>
               ) : (
