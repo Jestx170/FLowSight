@@ -56,8 +56,7 @@ try:
 except Exception as _e:
     log.warning("Could not set behavior_engine config path: %s", _e)
 
-TMPL_PATH      = os.path.join(TEMPLATES_DIR, "index.html")
-VUE_TMPL_PATH  = os.path.join(TEMPLATES_DIR, "index_vue.html")  # Vue SPA, served at /v2 during migration
+SPA_TMPL_PATH  = os.path.join(TEMPLATES_DIR, "index.html")  # built React SPA shell, served at /
 TZ         = int(os.environ.get("TZ_OFFSET", "7"))
 MAX_ALERTS = 200
 
@@ -159,6 +158,101 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=FULL")
     return conn
 
+def _db_is_ok(path: str) -> bool:
+    """True if `path` is absent (nothing to verify) or passes quick_check."""
+    if not os.path.exists(path):
+        return True
+    try:
+        c = sqlite3.connect(path, timeout=15)
+        try:
+            row = c.execute("PRAGMA quick_check").fetchone()
+            return bool(row) and row[0] == "ok"
+        finally:
+            c.close()
+    except Exception:
+        return False
+
+def _salvage_with_cli(corrupt_path: str, out_path: str) -> bool:
+    """Best-effort row salvage via the sqlite3 CLI `.recover` (purpose-built
+    for corrupt files). Returns True only if it produced a DB that itself
+    passes quick_check. No-op when the CLI isn't on PATH (e.g. embedded
+    Python on Windows)."""
+    import shutil, subprocess
+    exe = shutil.which("sqlite3")
+    if not exe:
+        return False
+    try:
+        dump = subprocess.run([exe, corrupt_path, ".recover"],
+                              capture_output=True, text=True, timeout=300)
+        sql = dump.stdout
+        if not sql.strip():
+            return False
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        # Load the recovered SQL through the CLI too. `.recover` output contains
+        # dot-commands (e.g. .recover emits no dot-commands, but transaction +
+        # PRAGMA framing) that Python's executescript() rejects ("near '.'");
+        # piping CLI→CLI is the supported path and matches `sqlite3 a .recover |
+        # sqlite3 b`.
+        load = subprocess.run([exe, out_path], input=sql,
+                              capture_output=True, text=True, timeout=300)
+        if load.returncode != 0:
+            log.error("[DB] .recover load returned %d: %s",
+                      load.returncode, (load.stderr or "")[:200])
+        return _db_is_ok(out_path)
+    except Exception as e:
+        log.error("[DB] CLI .recover salvage failed: %s", e)
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except Exception:
+            pass
+        return False
+
+def _verify_and_recover_db() -> None:
+    """Integrity-check the behaviour DB at startup and auto-recover a corrupt
+    file so the app always boots onto a healthy database.
+
+    Corruption is realistic in the field because the DB may live on a
+    filesystem that doesn't support SQLite's WAL locking reliably (exFAT /
+    network volumes). On detection the bad file is moved aside (kept for
+    forensics / manual recovery), rows are salvaged when the sqlite3 CLI is
+    available, and ensure_db() then recreates any missing schema. Worst case
+    the app starts on a fresh empty DB instead of failing every query.
+    """
+    if _db_is_ok(DB_PATH):
+        return
+    log.error("[DB] integrity check FAILED — %s is corrupt; recovering", DB_PATH)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    corrupt_path = f"{DB_PATH}.corrupt-{ts}"
+    try:
+        os.replace(DB_PATH, corrupt_path)
+    except Exception as e:
+        log.error("[DB] could not move corrupt DB aside: %s", e)
+        corrupt_path = None
+    # Drop stale WAL/SHM sidecars so they can't be replayed onto the new DB.
+    for ext in ("-wal", "-shm"):
+        try:
+            if os.path.exists(DB_PATH + ext):
+                os.remove(DB_PATH + ext)
+        except Exception:
+            pass
+    recovered = bool(corrupt_path) and _salvage_with_cli(corrupt_path, DB_PATH)
+    if recovered:
+        n_ev = n_oc = 0
+        try:
+            c = sqlite3.connect(DB_PATH, timeout=15)
+            n_ev = c.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            n_oc = c.execute("SELECT COUNT(*) FROM occupancy_snapshots").fetchone()[0]
+            c.close()
+        except Exception:
+            pass
+        log.warning("[DB] salvaged into a fresh DB (events=%d, occupancy=%d); "
+                    "corrupt original kept at %s", n_ev, n_oc, corrupt_path)
+    else:
+        log.warning("[DB] could not salvage rows — starting with an empty DB. "
+                    "Corrupt original kept at %s", corrupt_path or "(move failed)")
+
 def ensure_db():
     conn = get_conn()
     conn.execute("""CREATE TABLE IF NOT EXISTS events (
@@ -203,6 +297,7 @@ def ensure_db():
     conn.commit()
     conn.close()
 
+_verify_and_recover_db()   # heal a corrupt DB before any query/schema work
 ensure_db()
 
 # Load saved cameras from brand_config on startup
@@ -1147,8 +1242,9 @@ def api_data_clear():
     deleted = DataManager(DB_PATH).delete_all_data()
     with alerts_lock:
         alerts.clear()
-    for engine in _heat_engines.values():
-        engine.reset()
+    for d in (_heat_engines, _heat_engines_cum):
+        for engine in d.values():
+            engine.reset()
     log.info("[DataClear] wiped %d events, %d occupancy rows; alerts + heatmaps reset",
              deleted.get("events", 0), deleted.get("occupancy", 0))
     return jsonify({"ok": True, **deleted})
@@ -1216,9 +1312,9 @@ def api_push():
 # ── Web UI ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
-    """Serves the new frontend build (React/Vue SPA)."""
+    """Serves the built React SPA shell."""
     try:
-        with open(VUE_TMPL_PATH, encoding="utf-8") as f:
+        with open(SPA_TMPL_PATH, encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         return "<h1>FlowSight</h1><p>Frontend build not found. Run: docker compose build</p>", 500
@@ -1701,6 +1797,11 @@ def _backup_db(dst_path: str) -> bool:
     (the previous good backup stays in place).
     """
     if not os.path.exists(DB_PATH):
+        return False
+    # Never snapshot a corrupt DB — doing so just propagates the damage into
+    # every backup (and hides it). Skip and keep the last good backup in place.
+    if not _db_is_ok(DB_PATH):
+        log.error("[Backup] skipped — live DB failed integrity check (%s)", dst_path)
         return False
     tmp = dst_path + ".tmp"
     src = dst = None

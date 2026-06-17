@@ -68,7 +68,7 @@ These features were verified against the source in this repository.
 |-------|--------------|
 | **Language** | Python 3.12, TypeScript |
 | **Backend / API** | Flask 3.x (threaded, single process) |
-| **Computer Vision** | Ultralytics YOLO11m, ByteTrack, OpenCV (`opencv-python` / `-headless` in Docker), NumPy, PyTorch (CPU or CUDA) |
+ห| **Computer Vision** | Ultralytics YOLO11m, ByteTrack, OpenCV (`opencv-python` / `-headless` in Docker), NumPy, PyTorch (CPU or CUDA) |
 | **Reporting** | ReportLab (PDF) |
 | **AI Insight** | Google Gemini API, Anthropic Claude API, offline rule-based fallback |
 | **Database** | SQLite (WAL mode) |
