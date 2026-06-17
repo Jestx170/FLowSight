@@ -56,8 +56,7 @@ try:
 except Exception as _e:
     log.warning("Could not set behavior_engine config path: %s", _e)
 
-TMPL_PATH      = os.path.join(TEMPLATES_DIR, "index.html")
-VUE_TMPL_PATH  = os.path.join(TEMPLATES_DIR, "index_vue.html")  # Vue SPA, served at /v2 during migration
+SPA_TMPL_PATH  = os.path.join(TEMPLATES_DIR, "index.html")  # built React SPA shell, served at /
 TZ         = int(os.environ.get("TZ_OFFSET", "7"))
 MAX_ALERTS = 200
 
@@ -159,6 +158,101 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=FULL")
     return conn
 
+def _db_is_ok(path: str) -> bool:
+    """True if `path` is absent (nothing to verify) or passes quick_check."""
+    if not os.path.exists(path):
+        return True
+    try:
+        c = sqlite3.connect(path, timeout=15)
+        try:
+            row = c.execute("PRAGMA quick_check").fetchone()
+            return bool(row) and row[0] == "ok"
+        finally:
+            c.close()
+    except Exception:
+        return False
+
+def _salvage_with_cli(corrupt_path: str, out_path: str) -> bool:
+    """Best-effort row salvage via the sqlite3 CLI `.recover` (purpose-built
+    for corrupt files). Returns True only if it produced a DB that itself
+    passes quick_check. No-op when the CLI isn't on PATH (e.g. embedded
+    Python on Windows)."""
+    import shutil, subprocess
+    exe = shutil.which("sqlite3")
+    if not exe:
+        return False
+    try:
+        dump = subprocess.run([exe, corrupt_path, ".recover"],
+                              capture_output=True, text=True, timeout=300)
+        sql = dump.stdout
+        if not sql.strip():
+            return False
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        # Load the recovered SQL through the CLI too. `.recover` output contains
+        # dot-commands (e.g. .recover emits no dot-commands, but transaction +
+        # PRAGMA framing) that Python's executescript() rejects ("near '.'");
+        # piping CLI→CLI is the supported path and matches `sqlite3 a .recover |
+        # sqlite3 b`.
+        load = subprocess.run([exe, out_path], input=sql,
+                              capture_output=True, text=True, timeout=300)
+        if load.returncode != 0:
+            log.error("[DB] .recover load returned %d: %s",
+                      load.returncode, (load.stderr or "")[:200])
+        return _db_is_ok(out_path)
+    except Exception as e:
+        log.error("[DB] CLI .recover salvage failed: %s", e)
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except Exception:
+            pass
+        return False
+
+def _verify_and_recover_db() -> None:
+    """Integrity-check the behaviour DB at startup and auto-recover a corrupt
+    file so the app always boots onto a healthy database.
+
+    Corruption is realistic in the field because the DB may live on a
+    filesystem that doesn't support SQLite's WAL locking reliably (exFAT /
+    network volumes). On detection the bad file is moved aside (kept for
+    forensics / manual recovery), rows are salvaged when the sqlite3 CLI is
+    available, and ensure_db() then recreates any missing schema. Worst case
+    the app starts on a fresh empty DB instead of failing every query.
+    """
+    if _db_is_ok(DB_PATH):
+        return
+    log.error("[DB] integrity check FAILED — %s is corrupt; recovering", DB_PATH)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    corrupt_path = f"{DB_PATH}.corrupt-{ts}"
+    try:
+        os.replace(DB_PATH, corrupt_path)
+    except Exception as e:
+        log.error("[DB] could not move corrupt DB aside: %s", e)
+        corrupt_path = None
+    # Drop stale WAL/SHM sidecars so they can't be replayed onto the new DB.
+    for ext in ("-wal", "-shm"):
+        try:
+            if os.path.exists(DB_PATH + ext):
+                os.remove(DB_PATH + ext)
+        except Exception:
+            pass
+    recovered = bool(corrupt_path) and _salvage_with_cli(corrupt_path, DB_PATH)
+    if recovered:
+        n_ev = n_oc = 0
+        try:
+            c = sqlite3.connect(DB_PATH, timeout=15)
+            n_ev = c.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            n_oc = c.execute("SELECT COUNT(*) FROM occupancy_snapshots").fetchone()[0]
+            c.close()
+        except Exception:
+            pass
+        log.warning("[DB] salvaged into a fresh DB (events=%d, occupancy=%d); "
+                    "corrupt original kept at %s", n_ev, n_oc, corrupt_path)
+    else:
+        log.warning("[DB] could not salvage rows — starting with an empty DB. "
+                    "Corrupt original kept at %s", corrupt_path or "(move failed)")
+
 def ensure_db():
     conn = get_conn()
     conn.execute("""CREATE TABLE IF NOT EXISTS events (
@@ -203,6 +297,7 @@ def ensure_db():
     conn.commit()
     conn.close()
 
+_verify_and_recover_db()   # heal a corrupt DB before any query/schema work
 ensure_db()
 
 # Load saved cameras from brand_config on startup
@@ -954,12 +1049,31 @@ def api_insight():
         return jsonify({"ok": False, "msg": str(e)}), 500
 
 # ── Heat map ────────────────────────────────────────────────────────────────
-_heat_engines: dict = {}   # cam_id -> HeatMapEngine
+# Two parallel engines per camera, fed the same person positions every frame:
+#   _heat_engines      — half_life_sec=20s. "Where is busy RIGHT NOW" — a spot
+#                         a person left fades out in ~tens of seconds. Good for
+#                         live floor-monitoring, useless for a long session: by
+#                         the time you stop a 9am–7pm run almost everything has
+#                         decayed away, so a same-day report off this engine
+#                         would show near-zero everywhere.
+#   _heat_engines_cum   — half_life_sec=0 (decay disabled). Pure cumulative
+#                         footfall across the whole run — this is what the
+#                         Reports page / "Stop & Save Report" reads, so a full
+#                         business day still adds up to a meaningful map at
+#                         the end instead of fading to nothing.
+# Both reset together (api_heatmap_reset) since they represent the same
+# tracking session; ?mode=cumulative on /jpeg and /zones reads the latter.
+_heat_engines:     dict = {}   # cam_id -> HeatMapEngine (live, decaying)
+_heat_engines_cum: dict = {}   # cam_id -> HeatMapEngine (cumulative, no decay)
+
+def _pick_heat_engine(cam_id: str, mode: str):
+    return (_heat_engines_cum if mode == "cumulative" else _heat_engines).get(cam_id)
 
 @app.route("/api/heatmap/jpeg")
 def api_heatmap_jpeg():
     cam_id = request.args.get("cam", "cam_0")
-    engine = _heat_engines.get(cam_id)
+    mode   = request.args.get("mode", "live")
+    engine = _pick_heat_engine(cam_id, mode)
     with _cams_lock:
         frame = _cam_frames.get(cam_id)
     if frame is None or engine is None:
@@ -976,9 +1090,10 @@ def api_heatmap_jpeg():
 @app.route("/api/heatmap/reset", methods=["POST"])
 def api_heatmap_reset():
     cam_id = (request.get_json(silent=True) or {}).get("cam", "cam_0")
-    engine = _heat_engines.get(cam_id)
-    if engine:
-        engine.reset()
+    for d in (_heat_engines, _heat_engines_cum):
+        engine = d.get(cam_id)
+        if engine:
+            engine.reset()
     return jsonify({"ok": True})
 
 def _scaled_zone_polys(engine, cam_id: str) -> dict:
@@ -1007,7 +1122,8 @@ def _scaled_zone_polys(engine, cam_id: str) -> dict:
 @app.route("/api/heatmap/zones")
 def api_heatmap_zones():
     cam_id = request.args.get("cam", "cam_0")
-    engine = _heat_engines.get(cam_id)
+    mode   = request.args.get("mode", "live")
+    engine = _pick_heat_engine(cam_id, mode)
     if engine is None:
         return jsonify([])
     scores = engine.get_top_zones(_scaled_zone_polys(engine, cam_id))
@@ -1020,15 +1136,20 @@ def api_heatmap_zones():
 def api_heatmap_report():
     """Snapshot the current top zones to a timestamped JSON report on disk.
 
-    Called when the user ends a session ("Stop & Save Report"); reads the live
-    heat buffer so mass/density are the latest values before stopping.
+    Called when the user ends a session ("Stop & Save Report"). Reads the
+    CUMULATIVE engine (no decay), not the live one — the live engine's heat
+    fades out within tens of seconds of a spot emptying, so by the end of an
+    hours-long session it reflects only the last moment, not the session as a
+    whole. Mass/density here are full-session footfall instead.
     """
     cam_id = (request.get_json(silent=True) or {}).get("cam", "cam_0")
-    engine = _heat_engines.get(cam_id)
+    engine = _heat_engines_cum.get(cam_id)
     if engine is None:
         return jsonify({"ok": False, "msg": f"No heatmap data ({cam_id})"}), 404
+    with _cams_lock:
+        frame = _cam_frames.get(cam_id)
     report = engine.generate_report(_scaled_zone_polys(engine, cam_id),
-                                    out_dir=REPORTS_DIR)
+                                    out_dir=REPORTS_DIR, frame=frame)
     return jsonify({"ok": True, **report})
 
 def _safe_report_path(name: str) -> Path | None:
@@ -1068,6 +1189,65 @@ def api_heatmap_report_detail(name):
     if p is None:
         return jsonify({"ok": False, "msg": "Report not found"}), 404
     return jsonify(json.loads(p.read_text(encoding="utf-8")))
+
+@app.route("/api/heatmap/reports/<name>", methods=["DELETE"])
+def api_heatmap_report_delete(name):
+    """Delete a saved report and its snapshot image (if any)."""
+    p = _safe_report_path(name)
+    if p is None:
+        return jsonify({"ok": False, "msg": "Report not found"}), 404
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    img_name = data.get("image")
+    p.unlink()
+    if img_name:
+        img = _safe_report_image_path(img_name)
+        if img is not None:
+            try:
+                img.unlink()
+            except Exception:
+                pass
+    return jsonify({"ok": True})
+
+def _safe_report_image_path(name: str) -> Path | None:
+    """Same path-traversal guard as _safe_report_path, for the .jpg snapshot
+    saved alongside a report (older reports predate the image and have none)."""
+    if (Path(name).name != name
+            or not name.startswith("heatmap_report_")
+            or not name.endswith(".jpg")):
+        return None
+    p = Path(REPORTS_DIR) / name
+    return p if p.is_file() else None
+
+@app.route("/api/heatmap/reports/<name>/image")
+def api_heatmap_report_image(name):
+    """Colorized heat-map snapshot for a saved report (see generate_report)."""
+    p = _safe_report_image_path(name)
+    if p is None:
+        return jsonify({"ok": False, "msg": "Image not found"}), 404
+    return Response(p.read_bytes(), mimetype="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+@app.route("/api/data/clear", methods=["POST"])
+def api_data_clear():
+    """Wipe accumulated runtime/test data so the next test run starts clean:
+    every row in behavior_log.db (events + occupancy snapshots), the
+    in-memory alert feed, and every camera's live heat-map buffer.
+
+    Saved heat-map session reports (Reports page) are deliberately left
+    alone — those are exports you asked for, not test noise."""
+    from src.utils.data_manager import DataManager
+    deleted = DataManager(DB_PATH).delete_all_data()
+    with alerts_lock:
+        alerts.clear()
+    for d in (_heat_engines, _heat_engines_cum):
+        for engine in d.values():
+            engine.reset()
+    log.info("[DataClear] wiped %d events, %d occupancy rows; alerts + heatmaps reset",
+             deleted.get("events", 0), deleted.get("occupancy", 0))
+    return jsonify({"ok": True, **deleted})
 
 # ── Demo Image ────────────────────────────────────────────────────────────────
 import base64
@@ -1132,9 +1312,9 @@ def api_push():
 # ── Web UI ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
-    """Serves the new frontend build (React/Vue SPA)."""
+    """Serves the built React SPA shell."""
     try:
-        with open(VUE_TMPL_PATH, encoding="utf-8") as f:
+        with open(SPA_TMPL_PATH, encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         return "<h1>FlowSight</h1><p>Frontend build not found. Run: docker compose build</p>", 500
@@ -1297,6 +1477,11 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
     # old frame-count decay did.
     _heat_engines[cam_id] = HeatMapEngine(width=_fw, height=_fh, half_life_sec=20.0)
     heat_eng = _heat_engines[cam_id]
+    # half_life_sec=0: decay disabled — pure cumulative footfall for the whole
+    # run, so an end-of-day "Stop & Save Report" still has something to show
+    # (see the _heat_engines_cum comment above for why this is separate).
+    _heat_engines_cum[cam_id] = HeatMapEngine(width=_fw, height=_fh, half_life_sec=0)
+    heat_eng_cum = _heat_engines_cum[cam_id]
 
     import time as _time
     from collections import Counter
@@ -1525,6 +1710,7 @@ def camera_engine_loop(cam_cfg: dict, stop_event: threading.Event):
 
             # ── Heatmap update (pass person dicts, not PersonState) ───────
             heat_eng.update(people)
+            heat_eng_cum.update(people)
 
         except Exception as e:
             log.error("[Cam:%s] inference error: %s", cam_id, e)
@@ -1611,6 +1797,11 @@ def _backup_db(dst_path: str) -> bool:
     (the previous good backup stays in place).
     """
     if not os.path.exists(DB_PATH):
+        return False
+    # Never snapshot a corrupt DB — doing so just propagates the damage into
+    # every backup (and hides it). Skip and keep the last good backup in place.
+    if not _db_is_ok(DB_PATH):
+        log.error("[Backup] skipped — live DB failed integrity check (%s)", dst_path)
         return False
     tmp = dst_path + ".tmp"
     src = dst = None

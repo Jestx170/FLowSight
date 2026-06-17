@@ -56,7 +56,7 @@ flowsight/
 │  │  ├─ engine/                  ← AI: tracker.py, zones.py, behavior_engine.py
 │  │  ├─ utils/                   ← dashboard, heatmap, report_pdf, ai_insight, alert, logger, ...
 │  │  └─ paths.py                 ← จุดรวม path ทั้งหมด (PROJECT_ROOT = backend/)
-│  ├─ templates/index_vue.html    ← React build (HTML) — เสิร์ฟที่ `/`
+│  ├─ templates/index.html    ← React build (HTML) — เสิร์ฟที่ `/`
 │  ├─ static/assets/              ← React build output (JS/CSS) + ไอคอน
 │  ├─ config/*.json               ← zones / behaviors / brand (แก้ผ่าน UI ได้)
 │  └─ data/                       ← yolov8n.pt (โมเดล) + behavior_log.db
@@ -174,9 +174,9 @@ npm run build                    # ได้ frontend/dist/
 ```
 จากนั้น deploy ผลลัพธ์เข้า backend (Dockerfile ทำ 2 บรรทัดนี้ให้):
 - `frontend/dist/assets/*`   → `backend/static/assets/`
-- `frontend/dist/index.html` → `backend/templates/index_vue.html`
+- `frontend/dist/index.html` → `backend/templates/index.html`
 
-> Flask เสิร์ฟ `index_vue.html` ที่ `/` และ asset ที่ `/static/...`
+> Flask เสิร์ฟ `index.html` ที่ `/` และ asset ที่ `/static/...`
 > (vite `base` เป็น `/static/` ตอน production — ดู [vite.config.ts](frontend/vite.config.ts#L10))
 
 ### 5.2 Build Docker image

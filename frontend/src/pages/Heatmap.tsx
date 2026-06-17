@@ -11,6 +11,7 @@ export function HeatmapPage() {
   const [zones, setZones] = useState<HeatZone[]>([]);
 
   const [viewMode, setViewMode] = useState<'mass' | 'density'>('mass');
+  const [timeMode, setTimeMode] = useState<'live' | 'cumulative'>('live');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -19,11 +20,17 @@ export function HeatmapPage() {
 
   useEffect(() => {
     if (!cam) return;
-    const tick = () => { setBust(Date.now()); api.heatmapZones(cam).then(setZones).catch(() => setZones([])); };
+    const tick = () => { setBust(Date.now()); api.heatmapZones(cam, timeMode).then(setZones).catch(() => setZones([])); };
     tick();
     const id = window.setInterval(tick, 3000);
     return () => window.clearInterval(id);
-  }, [cam]);
+  }, [cam, timeMode]);
+
+  // Mass and Density rank zones differently (total footfall vs. how packed a
+  // zone is per unit area) — re-sort by whichever metric is selected so the
+  // two views actually look different instead of just relabeling the same bars.
+  const sortedZones = [...zones].sort((a, b) =>
+    viewMode === 'mass' ? b.mass - a.mass : b.density - a.density);
 
   const reset = async () => { try { await api.heatmapReset(); setBust(Date.now()); } catch (e) { console.error(e); } };
   const saveReport = async () => {
@@ -32,7 +39,10 @@ export function HeatmapPage() {
     try {
       const r = await api.heatmapReport(cam);
       const top = r.zones[0];
-      alert(`✅ บันทึก Report สำเร็จ (${r.zone_count} โซน)` +
+      // Report always reads the cumulative (whole-session) engine regardless
+      // of the Live/Cumulative toggle above — that's what makes it a usable
+      // end-of-day summary instead of whatever's live at the moment you click.
+      alert(`✅ บันทึก Report สำเร็จ — สะสมทั้งเซสชัน (${r.zone_count} โซน)` +
             (top ? `\nโซนที่มีคนใช้งานมากสุด: ${top.name} (Mass ${top.mass})` : "") +
             `\n\nไฟล์: ${r.file}`);
     } catch (e) {
@@ -42,7 +52,7 @@ export function HeatmapPage() {
       setSaving(false);
     }
   };
-  const maxScore = Math.max(1, ...zones.map((z) => viewMode === 'mass' ? z.mass : z.density));
+  const maxScore = Math.max(1, ...sortedZones.map((z) => viewMode === 'mass' ? z.mass : z.density));
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -68,22 +78,57 @@ export function HeatmapPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 border border-border w-fit rounded-lg p-1">
-        <button 
-          onClick={() => setViewMode('mass')}
-          className={`px-4 py-1.5 text-sm rounded ${viewMode === 'mass' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
-        >
-          Total Mass
-        </button>
-        <button 
-          onClick={() => setViewMode('density')}
-          className={`px-4 py-1.5 text-sm rounded ${viewMode === 'density' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
-        >
-          Average Density
-        </button>
+      <div className="flex flex-wrap gap-3">
+        <div className="flex gap-2 border border-border w-fit rounded-lg p-1">
+          <button
+            onClick={() => setTimeMode('live')}
+            className={`px-4 py-1.5 text-sm rounded ${timeMode === 'live' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+          >
+            Live (now)
+          </button>
+          <button
+            onClick={() => setTimeMode('cumulative')}
+            className={`px-4 py-1.5 text-sm rounded ${timeMode === 'cumulative' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+          >
+            Cumulative (whole session)
+          </button>
+        </div>
+
+        <div className="flex gap-2 border border-border w-fit rounded-lg p-1">
+          <button
+            onClick={() => setViewMode('mass')}
+            className={`px-4 py-1.5 text-sm rounded ${viewMode === 'mass' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+          >
+            Total Mass
+          </button>
+          <button
+            onClick={() => setViewMode('density')}
+            className={`px-4 py-1.5 text-sm rounded ${viewMode === 'density' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+          >
+            Average Density
+          </button>
+        </div>
       </div>
 
-      <div className="fs-card text-sm leading-relaxed">
+      <div className="fs-card text-sm leading-relaxed space-y-2">
+        {timeMode === 'live' ? (
+          <p>
+            <span className="font-semibold text-foreground">Live (now):</span>{" "}
+            <span className="text-muted-foreground">
+              ความเข้มจะค่อยๆจางลงเมื่อจุดนั้นไม่มีคนแล้ว (ครึ่งความเข้มทุก ~20 วินาที) —
+              เหมาะกับดูว่า "ตอนนี้" ตรงไหนมีคนอยู่ ไม่เหมาะกับสรุปทั้งวัน เพราะถ้าทิ้งไว้นานความเข้มจะจางจนเหลือ 0
+              ก่อนถึงเวลาที่คุณจะมาดูสรุป
+            </span>
+          </p>
+        ) : (
+          <p>
+            <span className="font-semibold text-foreground">Cumulative (whole session):</span>{" "}
+            <span className="text-muted-foreground">
+              สะสมไปเรื่อยๆไม่จางหาย ตั้งแต่กด Reset ครั้งล่าสุด — ใช้โหมดนี้ถ้าจะเปิดระบบทิ้งไว้ทั้งวัน (เช่น 9:00–19:00)
+              แล้วกด "Stop & Save Report" ตอนปิดร้านเพื่อดูสรุปฮีตแมปทั้งวัน ไม่ใช่แค่ไม่กี่วินาทีล่าสุด
+            </span>
+          </p>
+        )}
         {viewMode === 'mass' ? (
           <p>
             <span className="font-semibold text-foreground">Mass (Total):</span>{" "}
@@ -107,7 +152,7 @@ export function HeatmapPage() {
         <div className="fs-card lg:col-span-2">
           <div className="rounded-md overflow-hidden border border-border bg-black aspect-video flex items-center justify-center">
             {cam ? (
-              <img key={bust} src={`/api/heatmap/jpeg?cam=${encodeURIComponent(cam)}&t=${bust}`} alt="Heatmap"
+              <img key={`${bust}-${timeMode}`} src={api.heatmapJpegUrl(cam, timeMode, bust)} alt="Heatmap"
                 className="w-full h-full object-contain"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
             ) : (
@@ -118,11 +163,11 @@ export function HeatmapPage() {
 
         <div className="fs-card">
           <h2 className="font-semibold mb-3">{t.heat.zoneScores}</h2>
-          {zones.length === 0 ? (
+          {sortedZones.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">{t.common.noData}</p>
           ) : (
             <ul className="space-y-3">
-              {zones.map((z) => {
+              {sortedZones.map((z) => {
                 // เลือกค่าที่จะนำมาแสดงและคำนวณ Progress Bar ตามโหมดที่เลือก
                 const val = viewMode === 'mass' ? z.mass : z.density;
                 return (

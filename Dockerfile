@@ -64,7 +64,7 @@ COPY backend/templates/  ./templates/
 # stale build happens to sit in backend/templates on the host.
 COPY backend/static/     ./static/
 COPY --from=frontend /frontend/dist/assets/     ./static/assets/
-COPY --from=frontend /frontend/dist/index.html  ./templates/index_vue.html
+COPY --from=frontend /frontend/dist/index.html  ./templates/index.html
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

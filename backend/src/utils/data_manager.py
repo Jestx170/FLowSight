@@ -96,6 +96,35 @@ class DataManager:
         finally:
             conn.close()
 
+    def delete_all_data(self) -> dict:
+        """Wipe every event + occupancy row (used by the "Clear data" button so
+        test/demo runs don't pollute the next session's stats). Unlike
+        delete_old_data() this ignores retention — everything goes. Saved
+        heat-map session reports on disk are NOT touched by this; those are
+        deliberate exports, not accumulated test noise."""
+        if not os.path.exists(self.db_path):
+            return {"events": 0, "occupancy": 0}
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            conn.execute("DELETE FROM events")
+            occupancy = 0
+            try:
+                occupancy = conn.execute(
+                    "SELECT COUNT(*) FROM occupancy_snapshots").fetchone()[0]
+                conn.execute("DELETE FROM occupancy_snapshots")
+            except sqlite3.OperationalError:
+                pass   # table not created yet (pre-v2 DB)
+            conn.execute("DELETE FROM sqlite_sequence WHERE name='events'")
+            conn.commit()
+            conn.execute("VACUUM")
+            print(f"[DataManager] cleared all data — {events} events, "
+                  f"{occupancy} occupancy rows")
+            return {"events": events, "occupancy": occupancy}
+        finally:
+            conn.close()
+
     def run_daily_cleanup(self):
         """เรียกตอนเริ่ม main.py ทุกวัน — ลบอัตโนมัติ"""
         stats = self.get_stats()

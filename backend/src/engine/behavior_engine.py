@@ -239,9 +239,15 @@ class BehaviorInferenceEngine:
             st._zone_candidate_ct = 0
 
         st.last_center = (cx, cy)
-        st.is_staff    = (zone_cat == "staff")
+        # Use the HYSTERESIS-CONFIRMED category (st.zone_cat), not the raw
+        # per-frame `zone_cat` above — that raw value flips the instant a
+        # person's foot-point jitters across a zone edge (normal YOLO bbox
+        # noise), so is_staff/behavior would flicker every frame right at a
+        # boundary even though the 4-frame hysteresis exists specifically to
+        # prevent that. st.zone_cat already reflects the confirmed zone.
+        st.is_staff    = (st.zone_cat == "staff")
 
-        beh = self._match_behavior(zone_cat, dwell_sec, still, st.is_staff)
+        beh = self._match_behavior(st.zone_cat, dwell_sec, still, st.is_staff)
         st.behavior_id   = beh.get("id",    "moving")
         st.behavior_name = beh.get("name",  "Moving")
         st.needs_staff   = bool(beh.get("alert", False))

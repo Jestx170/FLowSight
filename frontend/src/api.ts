@@ -27,7 +27,7 @@ export interface Activity { ok: boolean; events: ActivityEvent[]; total: number;
 export interface Insight { ok: boolean; html: string; source: string }
 export interface BehaviorRow { id: string; name: string; zone: string; action: "moving" | "dwell" | "still" | "presence"; threshold: number; alert: boolean; color: string }
 export interface HeatZone { name: string; density : number; zone_id: string; mass: number;  }
-export interface HeatReport { ok: boolean; generated_at: string; zone_count: number; zones: HeatZone[]; file: string }
+export interface HeatReport { ok: boolean; generated_at: string; zone_count: number; zones: HeatZone[]; file: string; image?: string }
 export interface HeatReportSummary { file: string; generated_at: string; zone_count: number; top_zone: string | null }
 export interface ZonePoly { name: string; category: string; color: string; points: number[][] }
 export interface ZonesConfig { _meta?: { w: number; h: number }; [camId: string]: any }
@@ -56,11 +56,16 @@ export const api = {
   behaviors: () => j<BehaviorRow[]>("/api/behaviors"),
   behaviorsSave: (rows: BehaviorRow[]) => j("/api/behaviors/save", { method: "POST", body: JSON.stringify(rows) }),
   behaviorsReset: () => j("/api/behaviors/reset", { method: "POST" }),
-  heatmapZones: (cam: string) => j<HeatZone[]>(`/api/heatmap/zones?cam=${encodeURIComponent(cam)}`),
+  heatmapZones: (cam: string, mode: "live" | "cumulative" = "live") =>
+    j<HeatZone[]>(`/api/heatmap/zones?cam=${encodeURIComponent(cam)}&mode=${mode}`),
+  heatmapJpegUrl: (cam: string, mode: "live" | "cumulative", bust: number) =>
+    `/api/heatmap/jpeg?cam=${encodeURIComponent(cam)}&mode=${mode}&t=${bust}`,
   heatmapReset: () => j("/api/heatmap/reset", { method: "POST" }),
   heatmapReport: (cam: string) => j<HeatReport>("/api/heatmap/report", { method: "POST", body: JSON.stringify({ cam }) }),
   heatmapReports: () => j<HeatReportSummary[]>("/api/heatmap/reports"),
   heatmapReportDetail: (name: string) => j<HeatReport>(`/api/heatmap/reports/${encodeURIComponent(name)}`),
+  heatmapReportImageUrl: (name: string) => `/api/heatmap/reports/${encodeURIComponent(name)}/image`,
+  heatmapReportDelete: (name: string) => j(`/api/heatmap/reports/${encodeURIComponent(name)}`, { method: "DELETE" }),
   zonesLoad: () => j<ZonesConfig>("/api/zones/load"),
   zonesSave: (cfg: ZonesConfig) => j("/api/zones/save", { method: "POST", body: JSON.stringify(cfg) }),
   zonesDelete: (zone_id: string, cam: string) =>
@@ -72,6 +77,7 @@ export const api = {
   settings: () => j<Settings>("/api/settings"),
   settingsSave: (s: Partial<Settings>) => j("/api/settings", { method: "POST", body: JSON.stringify(s) }),
   camerasSave: (cameras: Camera[]) => j("/api/cameras/save", { method: "POST", body: JSON.stringify({ cameras }) }),
+  dataClear: () => j<{ ok: boolean; events: number; occupancy: number }>("/api/data/clear", { method: "POST" }),
 };
 
 export function useApiPoll<T>(fn: () => Promise<T>, ms: number, deps: unknown[] = []): { data: T | null; error: Error | null } {
